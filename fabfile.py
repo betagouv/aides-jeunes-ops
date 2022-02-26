@@ -7,9 +7,7 @@ import tempfile
 
 USER="root"
 WEBROOT_PATH="/var/www"
-
-# ANGULAR_FOLDER="mes-aides-angular"
-
+RSYNC_EXCLUDE="--exclude={.git,.venv,.venv37,.vagrant}"
 loader = Environment(loader=FileSystemLoader('.'))
 
 
@@ -38,12 +36,15 @@ def write_nginx_config(config0):
 def bootstrap(ctx, host):
   c = Connection(host=host, user=USER)
   c.config = ctx.config
+  email = c.config.get('email')
   c.run('mkdir --parents /opt/mes-aides')
-  c.run('apt-get install --assume-yes htop openssh-client python3-pip rsync vim')
-  c.local('rsync -r . %s@%s:/opt/mes-aides/ops --exclude .git --exclude .venv37 --exclude .vagrant -v' % (USER, host))
+  c.run('apt-get update')
+  c.run('apt-get install --assume-yes htop openssh-client libffi-dev rsync vim')
+  python(c)
+  c.local('rsync -r . %s@%s:/opt/mes-aides/ops %s -v' % (USER, host, RSYNC_EXCLUDE))
   c.run('apt-get update')
   if c.run('test -f $HOME/.ssh/id_rsa', warn=True).exited:
-    c.run('ssh-keygen -t rsa -q -f "$HOME/.ssh/id_rsa" -m PEM -N "" -C "aides-jeunes@beta.gouv.fr"')
+    c.run('ssh-keygen -t rsa -q -f "$HOME/.ssh/id_rsa" -m PEM -N "" -C "%s"' % email)
   c.run('cd /opt/mes-aides/ops && pip3 install --requirement requirements.txt')
   ssh_access(c)
   c.run('cd /opt/mes-aides/ops && fab tell-me-your-name --host localhost --identity $HOME/.ssh/id_rsa')
@@ -52,16 +53,16 @@ def bootstrap(ctx, host):
 @task
 def sync(ctx, host):
   c = Connection(host=host, user=USER)
-  c.local('rsync -r . %s@%s:/opt/mes-aides/ops --exclude={.git,.venv,.venv37,.vagrant} -v' % (USER, host))
+  c.local('rsync -r . %s@%s:/opt/mes-aides/ops %s -v' % (USER, host, RSYNC_EXCLUDE))
 
 
 # Core task for full porivisionning
 @task
 def provision(ctx, host, name, dns_ok=False):
-  if not dns_ok:
-    print_dns_records(host, name)
-    print_dns_records(host, '')
-    return
+  # if not dns_ok:
+  #   print_dns_records(host, name)
+  #   print_dns_records(host, '')
+  #   return
 
   c = Connection(host=host, user=USER)
   c.config = ctx.config
@@ -116,25 +117,18 @@ def regenerate_nginx_hosts(ctx, host):
 remote_location = '/home/main/aides-jeunes/backend/config/production.js'
 local_location = 'production.config.js'
 @task
-def production_config_get(ctx, host='mes-aides.1jeune1solution.beta.gouv.fr'):
+def production_config_get(ctx, host):
+  raise "TODO"
   c = Connection(host=host, user=USER)
   c.get(remote_location, local_location)
 
 
 @task
 def production_config_put(ctx, host):
+  raise "TODO"
   c = Connection(host=host, user=USER)
   c.put(local_location, remote_location)
-  app_restart(c)
-
-
-# Live hack task
-@task
-def fallback(ctx, host, name=None):
-  c = Connection(host=host, user=USER)
-  nginx_setup(c)
-  fullname = c.run('hostname').stdout.split()[0]
-  nginx_all_sites(c, fullname)
+  node_restart(c)
 
 
 def curl(c):
@@ -152,21 +146,20 @@ def curl(c):
 def provision_tasks(c, host, name):
   fullname = get_fullname(name)
 
-  system(c, fullname)
+  # system(c, fullname)
   nginx_setup(c)
-  node(c)
-  mongodb(c)
+  # node(c)
+  # mongodb(c)
 
-  monitor(c)
+  # monitor(c) # TODO
 
-  python(c)
-  openfisca_setup(c)
-  openfisca_config(c)
+  # letsencrypt(c)
 
-  app_setup(c)
-
-  letsencrypt(c)
-  nginx_all_sites(c, fullname)
+  for application in c.config.applications:
+    print(application)
+    #openfisca_setup(c, application)
+    node_setup(c, application)
+    nginx_all_sites(c, application)
 
   refresh_tasks(c, force=True)
 
@@ -178,8 +171,6 @@ def get_fullname(name):
 @task
 def add_next(ctx, host):
   c = Connection(host=host, user=USER)
-  # app_setup(c, ANGULAR_FOLDER, 'angular')
-  # app_refresh(c, ANGULAR_FOLDER)
 
 
 def print_dns_records(host, name):
@@ -196,10 +187,13 @@ def show_dns(ctx, host, name):
 
 def refresh_tasks(c, force=False):
   ssh_access(c)
+
   nginx_reload(c)
-  if app_refresh(c, force=force):
-    openfisca_refresh(c)
-  # app_refresh(c, ANGULAR_FOLDER)
+  for application in c.config.applications:
+    if node_refresh(c, application, force=force):
+      pass #openfisca_refresh(c, application)
+
+  # c.run('su - main -c "pm2 save"')
 
 
 def ssl_setup(c):
@@ -214,6 +208,7 @@ def ssh_reset(ctx, host):
   c.local('date')
   c.config = ctx.config
   ssh_access(c)
+
 
 def ssh_access(c):
   users = c.config.get('github', [])
@@ -234,9 +229,10 @@ def ssh_access(c):
 def nginx_setup(c):
   c.run('apt-get install --assume-yes nginx')
   c.put('files/nginx.ssl_params.conf', '/etc/nginx/snippets/ssl_params.conf')
-  c.put('files/nginx.upstreams.conf', '/etc/nginx/conf.d/upstreams.conf')
+  with write_template('files/nginx.upstreams.conf.template', c.config) as fp:
+    c.put(fp, '/etc/nginx/conf.d/upstreams.conf')
   c.put('files/nginx_mesaides_static.conf', '/etc/nginx/snippets/mes-aides-static.conf')
-  nginx_reload(c)
+  # nginx_reload(c)
   c.run('rm -f /etc/nginx/sites-enabled/default')
   c.run('mkdir --parents %s' % WEBROOT_PATH)
 
@@ -250,7 +246,7 @@ def nginx_reload(c):
 
 def letsencrypt(c):
   c.run('apt-get install --assume-yes certbot')
-  c.run('certbot register --non-interactive --agree-tos --email aides-jeunes@beta.gouv.fr')
+  c.run('certbot register --non-interactive --agree-tos --email %s' % c.config.get('email'))
 
 
 def nginx_site(c, config):
@@ -263,7 +259,7 @@ def nginx_site(c, config):
   if missing_certificate:
     with write_nginx_config(config) as fp:
       c.put(fp, '/etc/nginx/sites-enabled/%s.conf' % fullname)
-    nginx_reload(c)
+    #nginx_reload(c)
 
     letsencrypt_args = '--cert-name %s -d %s %s --webroot-path %s' % (fullname, fullname, ' --expand -d www.%s' % fullname if add_www_subdomain else '', WEBROOT_PATH)
     letsencrypt_command = 'certbot certonly --webroot --non-interactive %s' % letsencrypt_args
@@ -277,38 +273,34 @@ def nginx_site(c, config):
 
   with write_nginx_config({'ssl_exists': ssl_exists, **config}) as fp:
     c.put(fp, '/etc/nginx/sites-enabled/%s.conf' % fullname)
-  nginx_reload(c)
+  #nginx_reload(c)
 
 
-def nginx_sites(c, fullname, is_default=False, challenge_proxy=None):
+def nginx_sites(c, application, additional_domain=None):
+  application_name = application.get('name')
+  domain = additional_domain if additional_domain else application.get('domain')
+  challenge_proxy = application.get('challenge_proxy', None)
+  is_default = application.get('default_site', False)
   monitor = {
-    'name': 'monitor.%s' % fullname,
+    'name': 'monitor.%s' % domain,
     'upstream_name' : 'monitor',
     'challenge_proxy': challenge_proxy
   }
   nginx_site(c, monitor)
 
   main = {
-    'name': fullname,
+    'name': domain,
     'add_www_subdomain': True,
     'is_default': is_default,
-    'upstream_name' : 'mes_aides',
-    'nginx_root': '/home/main/aides-jeunes',
+    'upstream_name' : '%s_node' % application_name,
+    'nginx_root': get_repository_folder(application),
     'challenge_proxy': challenge_proxy,
   }
   nginx_site(c, main)
 
-  # angular_ = {
-  #   'name': 'v1.%s' % fullname,
-  #   'upstream_name' : 'mes_aides_angular',
-  #   'nginx_root': '/home/main/mes-aides-angular',
-  #   'challenge_proxy': challenge_proxy,
-  # }
-  # nginx_site(c, angular_)
-
   openfisca = {
-    'name': 'openfisca.%s' % fullname,
-    'upstream_name' : 'openfisca',
+    'name': 'openfisca.%s' % domain,
+    'upstream_name' : '%s_openfisca' % application_name,
     'challenge_proxy': challenge_proxy,
   }
   nginx_site(c, openfisca)
@@ -316,9 +308,9 @@ def nginx_sites(c, fullname, is_default=False, challenge_proxy=None):
   nginx_reload(c)
 
 
-def nginx_all_sites(c, fullname, challenge_proxy=None):
-  nginx_sites(c, fullname, is_default=False, challenge_proxy=challenge_proxy)
-  nginx_sites(c, 'mes-aides.1jeune1solution.beta.gouv.fr', is_default=True, challenge_proxy=challenge_proxy)
+def nginx_all_sites(c, application):
+  # TODO nginx_sites(c, fullname, is_default=False, challenge_proxy=challenge_proxy)
+  nginx_sites(c, application)
 
 
 def system(c, name=None):
@@ -360,9 +352,13 @@ def pm2(c):
   c.run('npm install --global pm2@3.5.1')
   c.run('pm2 startup systemd -u main --hp /home/main')
 
+  c.run('su - main -c "cd %s && pm2 install pm2-logrotate"' % folder)
+  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:max_size 50M"' % folder)
+  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:compress true"' % folder)
+
 
 def python(c):
-  c.run('apt-get install --assume-yes python3.7 python3.7-dev python3-venv')
+  c.run('apt-get install --assume-yes python3.7 python3.7-dev python3-pip python3-venv')
 
 
 # https://linuxhint.com/install_mongodb_debian_10/
@@ -389,65 +385,93 @@ def monitor(c):
   c.run('systemctl enable ma-monitor')
 
 
-def app_setup(c, folder='aides-jeunes', branch='master'):
-  c.run('su - main -c "git clone https://github.com/betagouv/aides-jeunes.git %s"' % folder)
-  c.run('su - main -c "cd %s && git checkout %s"' % (folder, branch))
-  production_path = '/home/main/%s/backend/config/production.js' % folder
+def get_application_folder(application):
+  return "/home/main/%s" % application.get('name')
+
+
+def get_repository_folder(application):
+  return "%s/repository" % get_application_folder(application)
+
+
+def node_setup(c, application):
+  app_folder = get_application_folder(application)
+  repository = application.get('repository')
+  repo_folder = get_repository_folder(application)
+  branch = application.get('branch', "master")
+
+  missing = c.run('[ -d %s ]' % repo_folder, warn=True).exited
+  if missing:
+    c.run('su - main -c "git clone %s %s"' % (repository, repo_folder))
+  c.run('su - main -c "cd %s && git checkout %s"' % (repo_folder, branch))
+  with write_template('files/pm2_config.yaml.template', { 'application': application }) as fp:
+    config_path = '%s/pm2_config.yaml' % app_folder
+    c.put(fp, config_path)
+    c.run('chown main:main %s' % config_path)
+
+  production_path = '%s/backend/config/production.js' % repo_folder
   result = c.run('[ -f %s ]' % production_path, warn=True)
   if result.exited:
-    c.run('su - main -c "cp /home/main/%s/backend/config/continuous_integration.js %s"' % (folder, production_path))
+    c.run('su - main -c "cp %s/backend/config/continuous-integration.js %s"' % (repo_folder, production_path))
 
-  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/stats\'"' % folder, warn=True)
+  varenv_prefix = "NODE_ENV=production MONGODB_URL: mongodb://localhost/db_%s" % application.get('name')
+  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/stats\'"' % repo_folder, warn=True)
   if test.exited:
-    c.run('su - main -c \'(crontab -l 2>/dev/null; echo "23 2 * * * /usr/bin/node /home/main/%s/backend/lib/stats") | crontab -\'' % folder)
-
-  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/email\'"' % folder, warn=True)
-  if test.exited:
-    cmd = "8 4 * * * (NODE_ENV=production /usr/bin/node /home/main/%s/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)" % folder
+    cmd = "23 2 * * * (%s /usr/bin/node %s/backend/lib/stats)" % (varenv_prefix, repo_folder)
     c.run('su - main -c \'(crontab -l 2>/dev/null; echo "%s") | crontab -\'' % cmd)
 
-  c.run('su - main -c "cd %s && pm2 install pm2-logrotate"' % folder)
-  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:max_size 50M"' % folder)
-  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:compress true"' % folder)
+  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/email\'"' % repo_folder, warn=True)
+  if test.exited:
+    cmd = "8 4 * * * (%s /usr/bin/node %s/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)" % (varenv_prefix, repo_folder)
+    c.run('su - main -c \'(crontab -l 2>/dev/null; echo "%s") | crontab -\'' % cmd)
 
 
-def app_refresh(c, folder='aides-jeunes', force=False):
+def node_refresh(c, application, force=False):
+  folder = get_repository_folder(application)
   startHash = c.run('su - main -c "cd %s && git rev-parse HEAD"' % folder).stdout
   c.run('su - main -c "cd %s && git pull"' % folder)
   refreshHash = c.run('su - main -c "cd %s && git rev-parse HEAD"' % folder).stdout
   if force or startHash != refreshHash:
-    c.run('su - main -c "cd %s && npm ci"' % folder)
-    c.run('su - main -c "cd %s && npm run prestart"' % folder)
-    app_restart(c, folder)
+    #TODO RMc.run('su - main -c "cd %s && npm ci"' % folder)
+    #TODO RMc.run('su - main -c "cd %s && npm run prestart"' % folder)
+    node_restart(c, application)
 
   return force or startHash != refreshHash
 
 
-def app_restart(c, folder):
-  c.run('su - main -c "cd %s && pm2 startOrReload /home/main/%s/pm2_config.yaml --update-env"' % (folder, folder))
-  c.run('su - main -c "cd %s && pm2 save"' % folder)
+def node_restart(c, application):
+  app_folder = get_application_folder(application)
+  c.run('su - main -c "pm2 startOrReload %s/pm2_config.yaml --update-env"' % app_folder)
 
 
-venv_dir = '/home/main/venv_python3.7'
-def openfisca_setup(c):
-  c.run('su - main -c "python3.7 -m venv %s"' % venv_dir)
+def get_venv_path_name(application):
+  return "/home/main/%s/venv" % application.get('name')
 
 
-def openfisca_reload(c):
-  result = c.run('service openfisca reload', warn=True)
+def get_openfisca_service_name(application):
+  return "%s_openfisca" % application.get('name')
+
+
+def openfisca_reload(c, application):
+  service_name = get_openfisca_service_name(application)
+  result = c.run('service %s reload' % service_name, warn=True)
   if result.exited:
-    c.run('service openfisca start')
+    c.run('service %s start' % service_name)
 
 
-def openfisca_config(c):
+def openfisca_setup(c, application):
+  venv_dir = get_venv_path_name(application)
+  service_name = get_openfisca_service_name(application)
+  print(service_name)
+  c.run('su - main -c "python3.7 -m venv %s"' % venv_dir)
   with write_template('files/openfisca.service.template', { 'venv_dir': venv_dir }) as fp:
-    c.put(fp, '/etc/systemd/system/openfisca.service')
+    c.put(fp, '/etc/systemd/system/%s.service' % service_name)
   c.run('systemctl daemon-reload')
-  openfisca_reload(c)
-  c.run('systemctl enable openfisca')
+  openfisca_reload(c, application)
+  c.run('systemctl enable %s' % service_name)
 
 
-def openfisca_refresh(c):
+def openfisca_refresh(c, application):
+  venv_dir = get_venv_path_name(application)
   c.run('su - main -c "%s/bin/pip3 install --upgrade pip"' % venv_dir)
-  c.run('su - main -c "cd aides-jeunes && %s/bin/pip3 install --upgrade -r openfisca/requirements.txt"' % venv_dir)
-  openfisca_reload(c)
+  c.run('su - main -c "cd %s && %s/bin/pip3 install --upgrade -r openfisca/requirements.txt"' % (application.get('name'), venv_dir))
+  openfisca_reload(c, application)

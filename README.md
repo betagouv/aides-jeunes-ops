@@ -62,6 +62,21 @@ Development is done using Vagrant and a Debian 10 (buster).
 The `vagrant up` command shoudl give you a VM in a similar environment as OVH **clean** instance.
 You have to run provisioning commands to set up the server.
 
+```
+SERVER=192.168.56.200
+NAME=testa
+ssh root@$SERVER -C date
+
+virtualenv .venv37 --python=python3.7
+source .venv37/bin/activate
+pip install --requirement requirements.txt --upgrade
+
+ssh-add ~/.ssh/id_rsa
+fab bootstrap --host $SERVER
+fab provision --host $SERVER --name $NAME
+# fab provision --host $SERVER --name $NAME --dns-ok # Once DNS have been updated
+```
+
 
 Currently, it gives you:
 - A MongoDB instance with default settings.

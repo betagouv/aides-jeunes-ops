@@ -1,0 +1,16 @@
+apps:
+  - name: {{ application.name }}-node-server
+    cwd: /home/main/{{ application.name }}/repository
+    script: server.js
+    instances: {{ application.node_instance_number }}
+    exec_mode: cluster
+    merge_logs: true
+    env:
+  {% if application.https %}
+      MES_AIDES_ROOT_URL: https://{{ application.domain }}
+  {% else %}
+      MES_AIDES_ROOT_URL: http://{{ application.domain }}
+  {% endif %}
+      MONGODB_URL: mongodb://localhost/db_{{ application.name }}
+      NODE_ENV: production
+      PORT: {{ application.node_server_port }}

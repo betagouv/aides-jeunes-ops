@@ -1,9 +1,15 @@
 host: 51.91.78.117
-name: wiru.mes-aides.1jeune1solution.beta.gouv.fr
+fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
+email: aides-jeunes@beta.gouv.fr
 github:
   - guillett
-  - MattiSG
-  - sandcha
-  - Cugniere
-  - Kout95
-  - Vanessa-D
+applications:
+  - name: aides_jeunes
+    repository: https://github.com/betagouv/aides-jeunes.git
+    branch: master
+    default_site: true
+    https: false
+    domain: mes-aides.1jeune1solution.beta.gouv.fr
+    node_server_port: 8004
+    node_instance_number: 2
+    openfisca_server_port: 2000

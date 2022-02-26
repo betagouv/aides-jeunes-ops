@@ -1,0 +1,18 @@
+upstream monitor {
+    server 127.0.0.1:8887;
+}
+
+{% for application in applications %}
+# {{ application.name }}
+
+upstream {{ application.name }}_node {
+    server 127.0.0.1:{{ application.node_server_port }};
+    keepalive 8;
+}
+
+upstream {{ application.name }}_openfisca {
+    server 127.0.0.1:{{ application.openfisca_server_port }};
+}
+
+
+{% endfor %}
