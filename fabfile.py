@@ -367,7 +367,6 @@ def python(c):
 
 # https://linuxhint.com/install_mongodb_debian_10/
 def mongodb(c):
-  result = c.run('apt-key list', hide=True)
   c.run('apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 9DA31620334BD75D9DCB49F368818C72E52529D4')
   c.run('echo "deb http://repo.mongodb.org/apt/debian/dists/stretch/mongodb-org/5.0/ main" | tee /etc/apt/sources.list.d/mongodb-org.list')
   c.run('apt-get update')
