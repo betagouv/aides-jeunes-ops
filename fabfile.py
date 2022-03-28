@@ -56,9 +56,16 @@ def sync(ctx, host):
   c.local('rsync -r . %s@%s:/opt/mes-aides/ops %s -v' % (USER, host, RSYNC_EXCLUDE))
 
 
+@task
+def generate_ssh_deploy_key(ctx, host=None):
+  host = (ctx.config.get('host') if host is None else host)
+  c = Connection(host=host, user=USER)
+  c.run('ssh-keygen -t rsa -b 4096 -f /tmp/tesst -q -N ""')
+
+
 # Core task for full porivisionning
 @task
-def provision(ctx, host, name, dns_ok=False):
+def provision(ctx, host, dns_ok=False):
   # if not dns_ok:
   #   print_dns_records(host, name)
   #   print_dns_records(host, '')
@@ -66,7 +73,7 @@ def provision(ctx, host, name, dns_ok=False):
 
   c = Connection(host=host, user=USER)
   c.config = ctx.config
-  provision_tasks(c, host, name)
+  provision_tasks(c, host)
 
 
 # Task for continuous deployment
@@ -143,18 +150,17 @@ def curl(c):
   raise BaseException("Curl could not be installed")
 
 
-def provision_tasks(c, host, name):
-  fullname = get_fullname(name)
+def provision_tasks(c, host):
+  fullname = c.config.get('fullname')
 
-  # system(c, fullname)
+  system(c, fullname)
   nginx_setup(c)
-  # node(c)
-  # mongodb(c)
+  node(c)
+  mongodb(c)
 
   # monitor(c) # TODO
 
-  # letsencrypt(c)
-
+  letsencrypt(c)
   for application in c.config.applications:
     print(application)
     #openfisca_setup(c, application)
@@ -163,14 +169,6 @@ def provision_tasks(c, host, name):
 
   refresh_tasks(c, force=True)
 
-
-def get_fullname(name):
-  return "%s.mes-aides.1jeune1solution.beta.gouv.fr" % name
-
-
-@task
-def add_next(ctx, host):
-  c = Connection(host=host, user=USER)
 
 
 def print_dns_records(host, name):
@@ -431,8 +429,8 @@ def node_refresh(c, application, force=False):
   c.run('su - main -c "cd %s && git pull"' % folder)
   refreshHash = c.run('su - main -c "cd %s && git rev-parse HEAD"' % folder).stdout
   if force or startHash != refreshHash:
-    #TODO RMc.run('su - main -c "cd %s && npm ci"' % folder)
-    #TODO RMc.run('su - main -c "cd %s && npm run prestart"' % folder)
+    c.run('su - main -c "cd %s && npm ci"' % folder)
+    c.run('su - main -c "cd %s && npm run prestart"' % folder)
     node_restart(c, application)
 
   return force or startHash != refreshHash

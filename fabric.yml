@@ -1,5 +1,7 @@
 host: 51.91.78.117
-fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
+fullname: wiru.mes-aides.org
+# host: 51.91.78.117
+# fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
 email: aides-jeunes@beta.gouv.fr
 github:
   - guillett
@@ -10,6 +12,6 @@ applications:
     default_site: true
     https: false
     domain: mes-aides.1jeune1solution.beta.gouv.fr
-    node_server_port: 8004
+    node_server_port: 8001
     node_instance_number: 2
-    openfisca_server_port: 2000
+    openfisca_server_port: 2001
