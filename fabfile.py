@@ -56,14 +56,7 @@ def sync(ctx, host):
   c.local('rsync -r . %s@%s:/opt/mes-aides/ops %s -v' % (USER, host, RSYNC_EXCLUDE))
 
 
-@task
-def generate_ssh_deploy_key(ctx, host=None):
-  host = (ctx.config.get('host') if host is None else host)
-  c = Connection(host=host, user=USER)
-  c.run('ssh-keygen -t rsa -b 4096 -f /tmp/tesst -q -N ""')
-
-
-# Core task for full porivisionning
+# Core task for full provisionning
 @task
 def provision(ctx, host):
   c = Connection(host=host, user=USER)
@@ -73,10 +66,10 @@ def provision(ctx, host):
 
 # Task for continuous deployment
 @task
-def refresh(ctx, host, force=False):
+def refresh(ctx, host, application=None, force=False):
   c = Connection(host=host, user=USER)
   c.config = ctx.config
-  refresh_tasks(c, force)
+  refresh_tasks(c, force, application)
 
 
 # Allow NGINX remote debugging
@@ -116,23 +109,6 @@ def regenerate_nginx_hosts(ctx, host):
   nginx_all_sites(c, fullname)
 
 
-remote_location = '/home/main/aides-jeunes/backend/config/production.js'
-local_location = 'production.config.js'
-@task
-def production_config_get(ctx, host):
-  raise "TODO"
-  c = Connection(host=host, user=USER)
-  c.get(remote_location, local_location)
-
-
-@task
-def production_config_put(ctx, host):
-  raise "TODO"
-  c = Connection(host=host, user=USER)
-  c.put(local_location, remote_location)
-  node_restart(c)
-
-
 def curl(c):
   curl_versions = c.run("apt-cache show curl | grep Version | awk -F \" \" '{print $2}'", hide=True).stdout.split()
   for v in curl_versions:
@@ -148,42 +124,56 @@ def curl(c):
 def provision_tasks(c, host):
   fullname = c.config.get('fullname')
 
-  system(c, fullname)
-  nginx_setup(c)
-  node(c)
-  mongodb(c)
+  # system(c, fullname)
+  # nginx_setup(c)
+  # node(c)
+  # mongodb(c)
 
-  # monitor(c) # TODO
+  # # monitor(c) # TODO
 
-  letsencrypt(c)
+  # letsencrypt(c)
+  nginx_all_sites(c)
+
   for application in c.config.applications:
     node_setup(c, application)
     openfisca_setup(c, application)
-    nginx_all_sites(c, application)
+    generate_deploy_key(c, application)
 
   refresh_tasks(c, force=True)
 
 
-def print_dns_records(host, name):
-  print('DNS records should be updated')
-  suffix = '.' if len(name) else ''
-  print('\n'.join(['%s 3600 IN A %s' % (item.ljust(25), host) for item in ['%s%s' % (prefix, name) for prefix in ['', 'www%s' % suffix , 'openfisca%s' % suffix, 'monitor%s' % suffix]]])) #, 'v1.']]]))
-  print('Once it is done add --dns-ok')
+def print_dns_records(config):
+  fullname = config.get('fullname')
+  dns_root = config.get('dns_root')
+  dns_fullname = fullname[0:len(fullname)-len(dns_root)].strip(".")
+
+  items = [
+    dns_fullname,
+    'monitor.%s' % dns_fullname
+    ]
+  for domain in [fullname, a.get('domain') for a in config.get('applications')]:
+    name = domain[0:len(domain)-len(dns_root)].strip(".")
+    suffix = '.' if len(name) else ''
+    for prefix in ['', 'www%s' % suffix , 'openfisca%s' % suffix]:
+      items.append('%s%s' % (prefix, name))
+  print('\n'.join(['%s 3600 IN A %s' % (
+    item.ljust(30), config.get('host')
+  ) for item in items]))
 
 
 @task
-def show_dns(ctx, host, name):
-  print_dns_records(host, name)
+def show_dns(ctx):
+  print_dns_records(ctx.config)
 
 
-def refresh_tasks(c, force=False):
+def refresh_tasks(c, application=None, force=False):
   ssh_access(c)
 
   nginx_reload(c)
-  for application in c.config.applications:
-    # if node_refresh(c, application, force=force):
-      # openfisca_refresh(c, application)
-    openfisca_refresh(c, application)
+  for app in c.config.applications:
+    if application in [None, app.get('name')]:
+      if node_refresh(c, app, force=force):
+        openfisca_refresh(c, app)
 
 
 def ssl_setup(c):
@@ -201,11 +191,19 @@ def ssh_reset(ctx, host):
   ssh_access(c)
 
 
+def get_application_ssh_data(c, application):
+  cmd = c.run('cat %s.pub' % generate_deploy_key(c, application), hide=True, warn=True)
+  return {
+    'name': application.get('name'),
+    'key': None if cmd.exited else cmd.stdout
+  }
+
 def ssh_access(c):
   users = c.config.get('github', [])
   assert len(users), "Attention, aucun utilisateur github spécifié, risque d'être bloqué hors du serveur !"
   conf = {
     'root': c.run('cat ~/.ssh/id_rsa.pub', hide=True, warn=True).stdout,
+    'applications': [ get_application_ssh_data(c, application) for application in c.config.applications ],
     'users': [{ 'name': u, 'ssh_keys': requests.get("https://github.com/%s.keys" % u).text} for u in users]
   }
   c.put('files/update.sh', '/opt/mes-aides/update.sh')
@@ -215,6 +213,18 @@ def ssh_access(c):
   c.sudo('mv authorized_keys /root/.ssh/authorized_keys')
   c.sudo('chmod 600 /root/.ssh/authorized_keys')
   c.sudo('chown root:root /root/.ssh/authorized_keys')
+
+
+def get_application_deploy_key_path(application):
+  return '%s/id_rsa' % get_application_folder(application)
+
+
+def generate_deploy_key(c, application):
+  key_path = get_application_deploy_key_path(application)
+  missing_key = c.run('test -e %s' % key_path, warn=True).exited
+  if missing_key:
+    c.run('ssh-keygen -t rsa -b 4096 -f %s -q -N ""' % key_path, warn=True)
+  return key_path
 
 
 def nginx_setup(c):
@@ -267,17 +277,11 @@ def nginx_site(c, config):
   nginx_reload(c)
 
 
-def nginx_sites(c, application, additional_domain=None):
+def nginx_application_sites(c, application, additional_domain=None):
   application_name = application.get('name')
   domain = additional_domain if additional_domain else application.get('domain')
   challenge_proxy = application.get('challenge_proxy', None)
   is_default = application.get('default_site', False)
-  monitor = {
-    'name': 'monitor.%s' % domain,
-    'upstream_name' : 'monitor',
-    'challenge_proxy': challenge_proxy
-  }
-  nginx_site(c, monitor)
 
   main = {
     'name': domain,
@@ -299,8 +303,16 @@ def nginx_sites(c, application, additional_domain=None):
   nginx_reload(c)
 
 
-def nginx_all_sites(c, application):
-  nginx_sites(c, application)
+def nginx_all_sites(c):
+  # TODO fullname + monitor
+  monitor = {
+    'name': 'monitor.%s' % domain,
+    'upstream_name' : 'monitor',
+  }
+  nginx_site(c, monitor)
+
+  for application in c.config.applications:
+    nginx_application_sites(c, application)
 
 
 def system(c, name=None):

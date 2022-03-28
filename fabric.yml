@@ -1,9 +1,20 @@
-host: 51.91.78.117
+host: 192.168.56.200 #51.91.78.117
 fullname: wiru.mes-aides.org
+dns_root: mes-aides.org
 email: equipe@mes-aides.org
 github:
   - guillett
 applications:
+  - name: main
+    repository: https://github.com/mes-aides/simulateur.git
+    branch: master
+    default_site: true
+    https: false
+    domain: mes-aides.org
+    node_server_port: 8000
+    node_instance_number: 2
+    openfisca_server_port: 2000
+    openfisca_worker_number: 2
   - name: org_test
     repository: https://github.com/mes-aides/simulateur.git
     branch: next_master
