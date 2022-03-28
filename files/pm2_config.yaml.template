@@ -8,9 +8,12 @@ apps:
     env:
   {% if application.https %}
       MES_AIDES_ROOT_URL: https://{{ application.domain }}
+      OPENFISCA_PUBLIC_ROOT_URL: https://openfisca.{{ application.domain }}
   {% else %}
       MES_AIDES_ROOT_URL: http://{{ application.domain }}
+      OPENFISCA_PUBLIC_ROOT_URL: http://openfisca.{{ application.domain }}
   {% endif %}
       MONGODB_URL: mongodb://localhost/db_{{ application.name }}
       NODE_ENV: production
+      OPENFISCA_INTERNAL_ROOT_URL: http://localhost:{{ application.openfisca_server_port }}
       PORT: {{ application.node_server_port }}

@@ -73,8 +73,7 @@ pip install --requirement requirements.txt --upgrade
 
 ssh-add ~/.ssh/id_rsa
 fab bootstrap --host $SERVER
-fab provision --host $SERVER --name $NAME
-# fab provision --host $SERVER --name $NAME --dns-ok # Once DNS have been updated
+fab provision --host $SERVER
 ```
 
 

@@ -65,12 +65,7 @@ def generate_ssh_deploy_key(ctx, host=None):
 
 # Core task for full porivisionning
 @task
-def provision(ctx, host, dns_ok=False):
-  # if not dns_ok:
-  #   print_dns_records(host, name)
-  #   print_dns_records(host, '')
-  #   return
-
+def provision(ctx, host):
   c = Connection(host=host, user=USER)
   c.config = ctx.config
   provision_tasks(c, host)
@@ -162,13 +157,11 @@ def provision_tasks(c, host):
 
   letsencrypt(c)
   for application in c.config.applications:
-    print(application)
-    #openfisca_setup(c, application)
     node_setup(c, application)
+    openfisca_setup(c, application)
     nginx_all_sites(c, application)
 
   refresh_tasks(c, force=True)
-
 
 
 def print_dns_records(host, name):
@@ -188,10 +181,9 @@ def refresh_tasks(c, force=False):
 
   nginx_reload(c)
   for application in c.config.applications:
-    if node_refresh(c, application, force=force):
-      pass #openfisca_refresh(c, application)
-
-  # c.run('su - main -c "pm2 save"')
+    # if node_refresh(c, application, force=force):
+      # openfisca_refresh(c, application)
+    openfisca_refresh(c, application)
 
 
 def ssl_setup(c):
@@ -199,6 +191,7 @@ def ssl_setup(c):
   missing = c.run('test -e %s' % dhparam_path, warn=True).exited
   if missing:
     c.run('/usr/bin/openssl dhparam -out %s 2048' % dhparam_path)
+
 
 @task
 def ssh_reset(ctx, host):
@@ -230,7 +223,7 @@ def nginx_setup(c):
   with write_template('files/nginx.upstreams.conf.template', c.config) as fp:
     c.put(fp, '/etc/nginx/conf.d/upstreams.conf')
   c.put('files/nginx_mesaides_static.conf', '/etc/nginx/snippets/mes-aides-static.conf')
-  # nginx_reload(c)
+  nginx_reload(c)
   c.run('rm -f /etc/nginx/sites-enabled/default')
   c.run('mkdir --parents %s' % WEBROOT_PATH)
 
@@ -257,7 +250,7 @@ def nginx_site(c, config):
   if missing_certificate:
     with write_nginx_config(config) as fp:
       c.put(fp, '/etc/nginx/sites-enabled/%s.conf' % fullname)
-    #nginx_reload(c)
+    nginx_reload(c)
 
     letsencrypt_args = '--cert-name %s -d %s %s --webroot-path %s' % (fullname, fullname, ' --expand -d www.%s' % fullname if add_www_subdomain else '', WEBROOT_PATH)
     letsencrypt_command = 'certbot certonly --webroot --non-interactive %s' % letsencrypt_args
@@ -271,7 +264,7 @@ def nginx_site(c, config):
 
   with write_nginx_config({'ssl_exists': ssl_exists, **config}) as fp:
     c.put(fp, '/etc/nginx/sites-enabled/%s.conf' % fullname)
-  #nginx_reload(c)
+  nginx_reload(c)
 
 
 def nginx_sites(c, application, additional_domain=None):
@@ -307,7 +300,6 @@ def nginx_sites(c, application, additional_domain=None):
 
 
 def nginx_all_sites(c, application):
-  # TODO nginx_sites(c, fullname, is_default=False, challenge_proxy=challenge_proxy)
   nginx_sites(c, application)
 
 
@@ -350,9 +342,9 @@ def pm2(c):
   c.run('npm install --global pm2@3.5.1')
   c.run('pm2 startup systemd -u main --hp /home/main')
 
-  c.run('su - main -c "cd %s && pm2 install pm2-logrotate"' % folder)
-  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:max_size 50M"' % folder)
-  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:compress true"' % folder)
+  c.run('su - main -c "pm2 install pm2-logrotate"')
+  c.run('su - main -c "pm2 set pm2-logrotate:max_size 50M"')
+  c.run('su - main -c "pm2 set pm2-logrotate:compress true"')
 
 
 def python(c):
@@ -411,7 +403,7 @@ def node_setup(c, application):
   if result.exited:
     c.run('su - main -c "cp %s/backend/config/continuous-integration.js %s"' % (repo_folder, production_path))
 
-  varenv_prefix = "NODE_ENV=production MONGODB_URL: mongodb://localhost/db_%s" % application.get('name')
+  varenv_prefix = "NODE_ENV=production MONGODB_URL=mongodb://localhost/db_%s" % application.get('name')
   test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/stats\'"' % repo_folder, warn=True)
   if test.exited:
     cmd = "23 2 * * * (%s /usr/bin/node %s/backend/lib/stats)" % (varenv_prefix, repo_folder)
@@ -458,10 +450,15 @@ def openfisca_reload(c, application):
 
 def openfisca_setup(c, application):
   venv_dir = get_venv_path_name(application)
+  repo_folder = get_repository_folder(application)
   service_name = get_openfisca_service_name(application)
-  print(service_name)
   c.run('su - main -c "python3.7 -m venv %s"' % venv_dir)
-  with write_template('files/openfisca.service.template', { 'venv_dir': venv_dir }) as fp:
+  with write_template('files/openfisca.service.template', {
+      'application': application,
+      'openfisca_worker_number': application.get('openfisca_worker_number', 3),
+      'repo_folder': repo_folder,
+      'venv_dir': venv_dir
+    }) as fp:
     c.put(fp, '/etc/systemd/system/%s.service' % service_name)
   c.run('systemctl daemon-reload')
   openfisca_reload(c, application)
@@ -469,7 +466,8 @@ def openfisca_setup(c, application):
 
 
 def openfisca_refresh(c, application):
+  repo_folder = get_repository_folder(application)
   venv_dir = get_venv_path_name(application)
   c.run('su - main -c "%s/bin/pip3 install --upgrade pip"' % venv_dir)
-  c.run('su - main -c "cd %s && %s/bin/pip3 install --upgrade -r openfisca/requirements.txt"' % (application.get('name'), venv_dir))
+  c.run('su - main -c "cd %s && %s/bin/pip3 install --upgrade -r openfisca/requirements.txt"' % (repo_folder, venv_dir))
   openfisca_reload(c, application)

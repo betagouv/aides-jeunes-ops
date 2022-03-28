@@ -8,7 +8,7 @@ Vagrant.configure("2") do |config|
   # That is not enough to `npm ci`
   # Upgrading to 3GB
   config.vm.provider :virtualbox do |vb|
-    vb.memory = 3072
+    vb.memory = 4072
   end
 
   # Faster startup
