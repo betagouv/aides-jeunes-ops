@@ -5,20 +5,20 @@ email: equipe@mes-aides.org
 github:
   - guillett
 applications:
-  - name: main
+  - name: mes_aides_org
     repository: https://github.com/mes-aides/simulateur.git
     branch: master
-    default_site: false
+    default_site: true
     https: false
     domain: mes-aides.org
     node_server_port: 8000
     node_instance_number: 2
     openfisca_server_port: 2000
     openfisca_worker_number: 2
-  - name: org_test
+  - name: caidf
     repository: https://github.com/mes-aides/caidf.git
     branch: start-dev-tg
-    default_site: true
+    default_site: false
     https: false
     domain: caidf.mes-aides.org
     node_server_port: 8042

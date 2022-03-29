@@ -106,6 +106,7 @@ def proxy_challenge(ctx, host, challenge_proxy):
 def regenerate_nginx_hosts(ctx, host):
   c = Connection(host=host, user=USER)
   c.config = ctx.config
+  nginx_setup(c)
   nginx_all_sites(c)
 
 
@@ -124,14 +125,14 @@ def curl(c):
 def provision_tasks(c, host):
   fullname = c.config.get('fullname')
 
-  # system(c, fullname)
-  # nginx_setup(c)
-  # node(c)
-  # mongodb(c)
+  system(c, fullname)
+  nginx_setup(c)
+  node(c)
+  mongodb(c)
 
-  # # monitor(c) # TODO
+  # monitor(c) # TODO
 
-  # letsencrypt(c)
+  letsencrypt(c)
   nginx_all_sites(c)
 
   for application in c.config.applications:
@@ -241,8 +242,9 @@ def nginx_setup(c):
 
 
 def nginx_reload(c):
-  c.run('nginx -t')
-  c.run('service nginx reload')
+  result = c.run('nginx -t', warn=True)
+  if not result.exited:
+    c.run('service nginx reload')
 
 
 def letsencrypt(c):
