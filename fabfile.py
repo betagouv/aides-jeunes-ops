@@ -105,8 +105,8 @@ def proxy_challenge(ctx, host, challenge_proxy):
 @task
 def regenerate_nginx_hosts(ctx, host):
   c = Connection(host=host, user=USER)
-  fullname = c.run('hostname').stdout.split()[0]
-  nginx_all_sites(c, fullname)
+  c.config = ctx.config
+  nginx_all_sites(c)
 
 
 def curl(c):
@@ -151,7 +151,7 @@ def print_dns_records(config):
     dns_fullname,
     'monitor.%s' % dns_fullname
     ]
-  for domain in [fullname, a.get('domain') for a in config.get('applications')]:
+  for domain in [fullname, *[a.get('domain') for a in config.get('applications')]]:
     name = domain[0:len(domain)-len(dns_root)].strip(".")
     suffix = '.' if len(name) else ''
     for prefix in ['', 'www%s' % suffix , 'openfisca%s' % suffix]:
@@ -281,7 +281,7 @@ def nginx_application_sites(c, application, additional_domain=None):
   application_name = application.get('name')
   domain = additional_domain if additional_domain else application.get('domain')
   challenge_proxy = application.get('challenge_proxy', None)
-  is_default = application.get('default_site', False)
+  is_default = application.get('default_site', False) if not additional_domain else False
 
   main = {
     'name': domain,
@@ -304,9 +304,16 @@ def nginx_application_sites(c, application, additional_domain=None):
 
 
 def nginx_all_sites(c):
-  # TODO fullname + monitor
+  fullname = c.config.get('fullname')
+
+  default_application = [
+    *[a for a in c.config.get('applications') if a.get('default_site')],
+    *[a for a in c.config.get('applications') if not a.get('default_site')],
+    ][0]
+  nginx_application_sites(c, default_application, fullname)
+
   monitor = {
-    'name': 'monitor.%s' % domain,
+    'name': 'monitor.%s' % fullname,
     'upstream_name' : 'monitor',
   }
   nginx_site(c, monitor)
@@ -430,7 +437,8 @@ def node_setup(c, application):
 def node_refresh(c, application, force=False):
   folder = get_repository_folder(application)
   startHash = c.run('su - main -c "cd %s && git rev-parse HEAD"' % folder).stdout
-  c.run('su - main -c "cd %s && git pull"' % folder)
+  branch = c.run('su - main -c "cd %s && git rev-parse --abbrev-ref HEAD"' % folder).stdout
+  c.run('su - main -c "cd %s && git fetch --all && git reset --hard origin/%s"' % (folder, branch))
   refreshHash = c.run('su - main -c "cd %s && git rev-parse HEAD"' % folder).stdout
   if force or startHash != refreshHash:
     c.run('su - main -c "cd %s && npm ci"' % folder)
