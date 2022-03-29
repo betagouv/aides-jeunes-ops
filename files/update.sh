@@ -5,7 +5,7 @@ set -e
 
 cd `dirname $0`
 
-echo "Your SSH connection ($1) triggered a shell script ($0)."
+echo "Your SSH connection triggered a shell script ($0 $@)."
 case "$1" in
     deploy)
         cd ops

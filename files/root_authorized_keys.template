@@ -19,8 +19,3 @@ command="/opt/mes-aides/update.sh deploy {{ application.name }}",no-pty,no-port-
 # No key yet
   {% endif %}
 {% endfor %}
-
-command="/opt/mes-aides/update.sh deploy",no-pty,no-port-forwarding,no-agent-forwarding ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC8ayvzVTdN3O2kq8LoAq6Kno2fB0oeFsfOBZfYR81X80O97dqIA/KYpRemRWtw5hOoPrbBtSJYnorRlukeFtsKrLqg4JIye59CyUDK5y1NEagJFKW3ggSdnaF7vgrIzkZdDBiQxiY2iYMAihjoNdmSTRJF2OHSvgEmJ+q6nvQCMW06oAs9iacnI7hhwDtCY9DuwHulbFbq0BkxEDUqAinAgkDYXWaaDYwVONNcKZ9GB7Q0Aet9FHqYKLK0fStKKYBzzS5V5dYZKIfM6XvgNkZahgKHYmcKwuqLJl7DI61rvVTTKqSlBnmRbGr00EV4BADVKpLoQR+kqEAz21utoFtBSyWGnQ/BLE9fVFoXm+SuQQ1YyUXf7Ej9jKd6OaU4+ERqbB1pikQ9xTTTuvuypO3AvuKI/5kvO3Mg1gmWdv8Fmz3kqourN96NDQFgZTHPadcoqUyWLCpMQn8FYX+7lWSsJMgVcwNzmKhDJpCpAS/AJ5OOYZItuZLtpRlsrL62ehtIcy1mCOYHaTAtoEsYwHRN8mOQ06uSGwhc0661pdUlRgHzrn8rpXkIsXc/NyBNblzlJFctyHf9eLsdBlSQrI0rrD6gGQLpPwCtGsSbNOG6nchr+vWnxesi6ZNdX4Xxuy+XfSXw2DqDfhsm+8HzvnSAyWDS9OkutSynelkRMyzI0w==
-
-# Github action deployment key
-command="/opt/mes-aides/update.sh deploy",no-pty,no-port-forwarding,no-agent-forwarding ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINXDIBt2iBV6ywaWxDzwYNr/4hEECL6lhLtiS1e0goAI
