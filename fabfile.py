@@ -61,15 +61,15 @@ def sync(ctx, host):
 def provision(ctx, host):
   c = Connection(host=host, user=USER)
   c.config = ctx.config
-  provision_tasks(c, host)
+  provision_tasks(c)
 
 
 # Task for continuous deployment
 @task
-def refresh(ctx, host, application=None, force=False):
-  c = Connection(host=host, user=USER)
+def refresh(ctx, application=None, force=False):
+  c = Connection(host=ctx.config.get('host'), user=USER)
   c.config = ctx.config
-  refresh_tasks(c, force, application)
+  refresh_tasks(c, force=force, application=get_application(c, application))
 
 
 # Allow NGINX remote debugging
@@ -101,10 +101,18 @@ def proxy_challenge(ctx, host, challenge_proxy):
   nginx_all_sites(c, fullname, challenge_proxy=challenge_proxy)
 
 
+def get_application(c, name):
+  matches = [a for a in c.config.get('applications') if name == a.get('name')]
+  if len(matches) == 1:
+    return matches[0]
+  else:
+    return None
+
+
 # Allow
 @task
-def regenerate_nginx_hosts(ctx, host):
-  c = Connection(host=host, user=USER)
+def regenerate_nginx_hosts(ctx):
+  c = Connection(host=ctx.config.get('host'), user=USER)
   c.config = ctx.config
   nginx_setup(c)
   nginx_all_sites(c)
@@ -122,7 +130,21 @@ def curl(c):
   raise BaseException("Curl could not be installed")
 
 
-def provision_tasks(c, host):
+@task
+def add_application(ctx, application):
+  c = Connection(host=ctx.config.get('host'), user=USER)
+  c.config = ctx.config
+
+  app = get_application(c, application)
+  if not app:
+    print("Problème de nom avec %s" % application)
+    return
+
+  setup_application(c, app)
+  refresh_tasks(c, force=True, application=app)
+
+
+def provision_tasks(c):
   fullname = c.config.get('fullname')
 
   system(c, fullname)
@@ -136,11 +158,15 @@ def provision_tasks(c, host):
   nginx_all_sites(c)
 
   for application in c.config.applications:
-    node_setup(c, application)
-    openfisca_setup(c, application)
-    generate_deploy_key(c, application)
+    setup_application(c, application)
 
   refresh_tasks(c, force=True)
+
+
+def setup_application(c, application):
+  node_setup(c, application)
+  openfisca_setup(c, application)
+  generate_deploy_key(c, application)
 
 
 def print_dns_records(config):
@@ -172,7 +198,7 @@ def refresh_tasks(c, application=None, force=False):
 
   nginx_reload(c)
   for app in c.config.applications:
-    if application in [None, app.get('name')]:
+    if application in [None, app]:
       if node_refresh(c, app, force=force):
         openfisca_refresh(c, app)
 
@@ -185,8 +211,8 @@ def ssl_setup(c):
 
 
 @task
-def ssh_reset(ctx, host):
-  c = Connection(host=host, user=USER)
+def ssh_reset(ctx):
+  c = Connection(host=ctx.config.get('host'), user=USER)
   c.local('date')
   c.config = ctx.config
   ssh_access(c)
