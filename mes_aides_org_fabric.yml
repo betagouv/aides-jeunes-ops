@@ -12,7 +12,7 @@ applications:
     repository: https://github.com/mes-aides/simulateur.git
     branch: master
     default_site: true
-    https: false
+    https: true
     domain: mes-aides.org
     node_server_port: 8001
     node_instance_number: 2
@@ -22,7 +22,7 @@ applications:
     repository: https://github.com/mes-aides/caidf.git
     branch: master
     default_site: false
-    https: false
+    https: true
     domain: caidf.mes-aides.org
     node_server_port: 8002
     node_instance_number: 2
