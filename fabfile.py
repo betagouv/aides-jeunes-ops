@@ -207,7 +207,7 @@ def refresh_tasks(c, application=None, force=False):
     for app in c.config.applications:
         if application in [None, app]:
             if node_refresh(c, app, force=force):
-                pass  # openfisca_refresh(c, app)
+                openfisca_refresh(c, app)
 
 
 def ssl_setup(c):
