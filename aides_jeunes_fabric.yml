@@ -13,7 +13,7 @@ applications:
     repository: https://github.com/betagouv/aides-jeunes.git
     branch: master
     default_site: true
-    https: false
+    https: true
     domain: mes-aides.1jeune1solution.beta.gouv.fr
     node_server_port: 8001
     node_instance_number: 4
