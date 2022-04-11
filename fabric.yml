@@ -1,30 +1,21 @@
-host: 54.36.62.128
-fullname: kuli.mes-aides.org
-dns_root: mes-aides.org
-email: equipe@mes-aides.org
+host: 5.135.137.147
+fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
+dns_root: beta.gouv.fr
+email: aides-jeunes@beta.gouv.fr
 github:
-  - jeremiecook
-  - ManonLger
-  - MattiSG
+  - Cugniere
   - guillett
+  - Kout95
+  - sandcha
+  - Vanessa-D
 applications:
-  - name: mes_aides_org
-    repository: https://github.com/mes-aides/simulateur.git
+  - name: aides_jeunes
+    repository: https://github.com/betagouv/aides-jeunes.git
     branch: master
     default_site: true
     https: false
-    domain: mes-aides.org
+    domain: mes-aides.1jeune1solution.beta.gouv.fr
     node_server_port: 8001
-    node_instance_number: 2
+    node_instance_number: 4
     openfisca_server_port: 2001
-    openfisca_worker_number: 2
-  - name: caidf
-    repository: https://github.com/mes-aides/caidf.git
-    branch: master
-    default_site: false
-    https: false
-    domain: caidf.mes-aides.org
-    node_server_port: 8002
-    node_instance_number: 2
-    openfisca_server_port: 2002
-    openfisca_worker_number: 2
+    openfisca_worker_number: 4
