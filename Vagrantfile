@@ -6,9 +6,9 @@ Vagrant.configure("2") do |config|
 
   # Guest have 500MB of RAM by default
   # That is not enough to `npm ci`
-  # Upgrading to 3GB
+  # Upgrading to 4GB
   config.vm.provider :virtualbox do |vb|
-    vb.memory = 4072
+    vb.memory = 4096
   end
 
   # Faster startup
