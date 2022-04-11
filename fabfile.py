@@ -180,7 +180,7 @@ def setup_application(c, application):
 def print_dns_records(config):
     fullname = config.get("fullname")
     dns_root = config.get("dns_root")
-    dns_fullname = fullname[0 : len(fullname) - len(dns_root)].strip(".")
+    dns_fullname = fullname[: -len(f".{dns_root}")]
 
     items = [dns_fullname, f"monitor.{dns_fullname}"]
     for domain in [fullname, *[a.get("domain") for a in config.get("applications")]]:
