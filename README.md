@@ -71,6 +71,8 @@ virtualenv .venv37 --python=python3.7
 source .venv37/bin/activate
 pip install --requirement requirements.txt --upgrade
 
+cp aides_jeunes_fabric.yml fabric.yml
+
 ssh-add ~/.ssh/id_rsa
 fab bootstrap --host $SERVER
 fab provision --host $SERVER

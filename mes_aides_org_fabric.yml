@@ -1,0 +1,30 @@
+host: 54.36.62.128
+fullname: kuli.mes-aides.org
+dns_root: mes-aides.org
+email: equipe@mes-aides.org
+github:
+  - jeremiecook
+  - ManonLger
+  - MattiSG
+  - guillett
+applications:
+  - name: mes_aides_org
+    repository: https://github.com/mes-aides/simulateur.git
+    branch: master
+    default_site: true
+    https: false
+    domain: mes-aides.org
+    node_server_port: 8001
+    node_instance_number: 2
+    openfisca_server_port: 2001
+    openfisca_worker_number: 2
+  - name: caidf
+    repository: https://github.com/mes-aides/caidf.git
+    branch: master
+    default_site: false
+    https: false
+    domain: caidf.mes-aides.org
+    node_server_port: 8002
+    node_instance_number: 2
+    openfisca_server_port: 2002
+    openfisca_worker_number: 2
