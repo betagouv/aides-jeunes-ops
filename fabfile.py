@@ -187,7 +187,7 @@ def print_dns_records(config):
     suffix = '.' if len(name) else ''
     for prefix in ['', f'www{suffix}' , f'openfisca{suffix}']:
       items.append(f'{prefix}{name}')
-  print('\n'.join([f'{item.ljust(30)} 3600 IN A {config.get('host')}' for item in items]))
+  print('\n'.join([f'{item.ljust(30)} 3600 IN A {config.get("host")}' for item in items]))
 
 
 @task
@@ -278,7 +278,7 @@ def nginx_reload(c):
 
 def letsencrypt(c):
   c.run('apt-get install --assume-yes certbot')
-  c.run(f'certbot register --non-interactive --agree-tos --email {c.config.get('email')}')
+  c.run(f'certbot register --non-interactive --agree-tos --email {c.config.get("email")}')
 
 
 def nginx_site(c, config):
@@ -305,7 +305,8 @@ def nginx_site(c, config):
       ssl_exists = False
 
   with write_nginx_config({'ssl_exists': ssl_exists, **config}) as fp:
-    c.put(fp, f'/etc/nginx/sites-enabled/{fullname}.conf'
+    c.put(fp, f'/etc/nginx/sites-enabled/{fullname}.conf')
+
   nginx_reload(c)
 
 
