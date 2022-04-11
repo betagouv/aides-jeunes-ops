@@ -207,7 +207,7 @@ def refresh_tasks(c, application=None, force=False):
     for app in c.config.applications:
         if application in [None, app]:
             if node_refresh(c, app, force=force):
-                openfisca_refresh(c, app)
+                pass  # openfisca_refresh(c, app)
 
 
 def ssl_setup(c):
@@ -488,13 +488,13 @@ def node_setup(c, application):
             f'su - main -c "cp {repo_folder}/backend/config/continuous-integration.js {production_path}"'
         )
 
-    varenv_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{application.get('name')}"
+    envvar_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{application.get('name')}"
     test = c.run(
         f"su - main -c \"crontab -l 2>/dev/null | grep -q '{repo_folder}/backend/lib/stats'\"",
         warn=True,
     )
     if test.exited:
-        cmd = f"23 2 * * * ({varenv_prefix} /usr/bin/node {repo_folder}/backend/lib/stats)"
+        cmd = f"23 2 * * * ({envvar_prefix} /usr/bin/node {repo_folder}/backend/lib/stats)"
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
     test = c.run(
@@ -502,7 +502,7 @@ def node_setup(c, application):
         warn=True,
     )
     if test.exited:
-        cmd = f"8 4 * * * ({varenv_prefix} /usr/bin/node {repo_folder}/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)"
+        cmd = f"8 4 * * * ({envvar_prefix} /usr/bin/node {repo_folder}/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)"
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
 
@@ -517,8 +517,9 @@ def node_refresh(c, application, force=False):
     )
     refreshHash = c.run(f'su - main -c "cd {folder} && git rev-parse HEAD"').stdout
     if force or startHash != refreshHash:
+        envvar = f"MES_AIDES_ROOT_URL=http{'s' if application['https'] else ''}://{ application['domain'] }"
         c.run(f'su - main -c "cd {folder} && npm ci"')
-        c.run(f'su - main -c "cd {folder} && npm run prestart"')
+        c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         node_restart(c, application)
 
     return force or startHash != refreshHash
