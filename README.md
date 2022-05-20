@@ -17,6 +17,8 @@ SERVER=51.91.78.117
 NAME=wiru
 ssh root@$SERVER -C date
 
+cp aides_jeunes_fabric.yml fabric.yml
+
 virtualenv .venv37 --python=python3.7
 source .venv37/bin/activate
 pip install --requirement requirements.txt --upgrade
