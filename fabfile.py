@@ -152,6 +152,20 @@ def add_application(ctx, application):
     refresh_tasks(c, force=True, application=app)
 
 
+@task
+def pm2_config_refresh(ctx, application):
+    c = Connection(host=ctx.config.get("host"), user=USER)
+    c.config = ctx.config
+
+    app = get_application(c, application)
+    if not app:
+        print(f"Problème de nom avec {application['name']}")
+        return
+
+    pm2_setup(c, app)
+    node_restart(c, app)
+
+
 def provision_tasks(c):
     fullname = c.config.get("fullname")
 
@@ -465,6 +479,16 @@ def get_repository_folder(application):
     return f"{get_application_folder(application)}/repository"
 
 
+def pm2_setup(c, application):
+    app_folder = get_application_folder(application)
+    with write_template(
+        "files/pm2_config.yaml.template", {"application": application}
+    ) as fp:
+        config_path = f"{app_folder}/pm2_config.yaml"
+        c.put(fp, config_path)
+        c.run(f"chown main:main {config_path}")
+
+
 def node_setup(c, application):
     app_folder = get_application_folder(application)
     repository = application.get("repository")
@@ -475,12 +499,7 @@ def node_setup(c, application):
     if missing:
         c.run(f'su - main -c "git clone {repository} {repo_folder}"')
     c.run(f'su - main -c "cd {repo_folder} && git checkout {branch}"')
-    with write_template(
-        "files/pm2_config.yaml.template", {"application": application}
-    ) as fp:
-        config_path = f"{app_folder}/pm2_config.yaml"
-        c.put(fp, config_path)
-        c.run(f"chown main:main {config_path}")
+    pm2_setup(c, application)
 
     production_path = f"{repo_folder}/dist-server/backend/config/production.js"
     result = c.run(f"[ -f {production_path} ]", warn=True)
