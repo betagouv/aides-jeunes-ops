@@ -410,7 +410,6 @@ def usermain(c):
 def node(c):
     c.run("curl --silent --location https://deb.nodesource.com/setup_16.x | bash -")
     c.run("apt-get install --assume-yes nodejs")
-    c.run("npm install -g npm@8.1.2")
     pm2(c)
 
 
