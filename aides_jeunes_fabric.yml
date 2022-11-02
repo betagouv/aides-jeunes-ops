@@ -6,7 +6,6 @@ github:
   - Cugniere
   - guillett
   - Shamzic
-  - Tumulte
   - Valandr
 applications:
   - name: aides_jeunes
@@ -29,3 +28,4 @@ applications:
     node_instance_number: 2
     openfisca_server_port: 2002
     openfisca_worker_number: 2
+
