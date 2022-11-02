@@ -43,6 +43,8 @@ source .venv37/bin/activate
 pip install --requirement requirements.txt --upgrade
 ```
 
+If you are using MacOS with a M1 processor, you need to use a version of Python superior or equal to `Python 3.9.7` in  order to be able to install and use `Fabric`.
+
 ### Update production provisioning
 
 Run the following command in your machine:
