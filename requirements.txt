@@ -1,4 +1,4 @@
-fabric==2.5.0
+fabric==2.7.0
 fabtools==0.20.0
 Jinja2==2.11.3
 MarkupSafe==1.1.0
