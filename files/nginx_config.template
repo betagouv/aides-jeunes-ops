@@ -6,7 +6,7 @@
   ssl_certificate_key /etc/letsencrypt/live/{{ name }}/privkey.pem;
   include snippets/ssl_params.conf;
 
-  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+  add_header Strict-Transport-Security "max-age=300; includeSubDomains";
 
 {%- endmacro %}
 
