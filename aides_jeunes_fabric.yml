@@ -14,6 +14,7 @@ applications:
     default_site: true
     https: true
     domain: mes-aides.1jeune1solution.beta.gouv.fr
+    dns_root: beta.gouv.fr
     node_server_port: 8001
     node_instance_number: 4
     openfisca_server_port: 2001
@@ -24,6 +25,7 @@ applications:
     default_site: false
     https: true
     domain: preprod.mes-aides.incubateur.net
+    dns_root: mes-aides.incubateur.net
     node_server_port: 8002
     node_instance_number: 2
     openfisca_server_port: 2002

@@ -182,17 +182,27 @@ def print_dns_records(config):
     dns_root = config.get("dns_root")
     dns_fullname = fullname[: -len(f".{dns_root}")]
 
-    items = [dns_fullname, f"monitor.{dns_fullname}"]
-    for domain in [fullname, *[a.get("domain") for a in config.get("applications")]]:
-        name = domain[0 : len(domain) - len(dns_root)].strip(".")
+    items = {dns_root: [dns_fullname, f"monitor.{dns_fullname}"]}
+
+    for app in config.get("applications"):
+        app_dns_root = app.get("dns_root", dns_root)
+        if app_dns_root not in items:
+            items[app_dns_root] = []
+        domain = app.get("domain")
+        name = domain[0 : len(domain) - len(app_dns_root)].strip(".")
         suffix = "." if len(name) else ""
         for prefix in ["", f"www{suffix}", f"openfisca{suffix}"]:
-            items.append(f"{prefix}{name}")
-    print(
-        "\n".join(
-            [f'{item.ljust(30)} 3600 IN A {config.get("host")}' for item in items]
+            items[app_dns_root].append(f"{prefix}{name}")
+
+
+    for dns_domain in items:
+        print()
+        print(dns_domain)
+        print(
+            "\n".join(
+                [f'{item.ljust(30)} 3600 IN A {config.get("host")}' for item in items[dns_domain]]
+            )
         )
-    )
 
 
 @task
