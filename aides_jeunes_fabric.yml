@@ -23,7 +23,7 @@ applications:
     branch: dev
     default_site: false
     https: true
-    domain: mes-aides-preprod.incubateur.net
+    domain: preprod.mes-aides.incubateur.net
     node_server_port: 8002
     node_instance_number: 2
     openfisca_server_port: 2002
