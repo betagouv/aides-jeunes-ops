@@ -530,7 +530,6 @@ def node_refresh(c, application, force=False):
         envvar = f"NODE_ENV=production MES_AIDES_ROOT_URL=http{'s' if application['https'] else ''}://{ application['domain'] }"
         c.run(f'su - main -c "cd {folder} && npm ci"')
         c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
-        c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         node_restart(c, application)
 
     return force or startHash != refreshHash
