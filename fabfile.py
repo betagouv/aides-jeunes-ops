@@ -490,6 +490,7 @@ def node_setup(c, application):
         )
 
     envvar_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{application.get('name')}"
+    envvar = f"NODE_ENV=production MES_AIDES_ROOT_URL=http{'s' if application['https'] else ''}://{ application['domain'] }"
     test = c.run(
         f"su - main -c \"crontab -l 2>/dev/null | grep -q '{repo_folder}/dist-server/backend/lib/stats'\"",
         warn=True,
@@ -504,6 +505,14 @@ def node_setup(c, application):
     )
     if test.exited:
         cmd = f"8 4 * * * ({envvar_prefix} /usr/bin/node {repo_folder}/dist-server/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)"
+        c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
+    
+    test = c.run(
+        f"su - main -c \"crontab -l 2>/dev/null | grep -q '{envvar} npm run tools:cleaner'\"",
+        warn=True,
+    )
+    if test.exited:
+        cmd = f"0 11 * * * (cd {repo_folder} && {envvar} npm run tools:cleaner)"
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
 
@@ -520,6 +529,7 @@ def node_refresh(c, application, force=False):
     if force or startHash != refreshHash:
         envvar = f"NODE_ENV=production MES_AIDES_ROOT_URL=http{'s' if application['https'] else ''}://{ application['domain'] }"
         c.run(f'su - main -c "cd {folder} && npm ci"')
+        c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         node_restart(c, application)
 
