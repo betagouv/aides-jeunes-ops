@@ -459,6 +459,26 @@ def monitor(c):
 
 def get_application_folder(application):
     return f"/home/main/{application.get('name')}"
+def app_setup(c, folder='aides-jeunes', branch='master'):
+  c.run('su - main -c "git clone https://github.com/betagouv/aides-jeunes.git %s"' % folder)
+  c.run('su - main -c "cd %s && git checkout %s"' % (folder, branch))
+  production_path = '/home/main/%s/backend/config/production.js' % folder
+  result = c.run('[ -f %s ]' % production_path, warn=True)
+  if result.exited:
+    c.run('su - main -c "cp /home/main/%s/backend/config/continuous_integration.js %s"' % (folder, production_path))
+
+  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/stats\'"' % folder, warn=True)
+  if test.exited:
+    c.run('su - main -c \'(crontab -l 2>/dev/null; echo "23 2 * * * /usr/bin/node /home/main/%s/backend/lib/stats") | crontab -\'' % folder)
+
+  test = c.run('su - main -c "crontab -l 2>/dev/null | grep -q \'%s/backend/lib/email\'"' % folder, warn=True)
+  if test.exited:
+    cmd = "8 4 * * * (NODE_ENV=production /usr/bin/node /home/main/%s/backend/lib/email.sh" % folder
+    c.run('su - main -c \'(crontab -l 2>/dev/null; echo "%s") | crontab -\'' % cmd)
+
+  c.run('su - main -c "cd %s && pm2 install pm2-logrotate"' % folder)
+  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:max_size 50M"' % folder)
+  c.run('su - main -c "cd %s && pm2 set pm2-logrotate:compress true"' % folder)
 
 
 def get_repository_folder(application):
