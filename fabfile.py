@@ -503,7 +503,7 @@ def node_setup(c, application):
         warn=True,
     )
     if test.exited:
-        cmd = f"8 4 * * * ({envvar_prefix} {repo_folder}/dist-server/backend/lib/email.sh"
+        cmd = f"8 4 * * * ({envvar_prefix} {repo_folder}/backend/lib/email.sh >> /var/log/main/emails.log 2>&1)"
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
 
