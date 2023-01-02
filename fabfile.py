@@ -78,6 +78,13 @@ def refresh(ctx, application=None, force=False):
     refresh_tasks(c, force=force, application=get_application(c, application))
 
 
+@task
+def update_crontab(ctx, application):
+    c = Connection(host=ctx.config.get("host"), user=USER)
+    c.config = ctx.config
+    crontab_setup(c, application=get_application(c, application))
+
+
 # Allow NGINX remote debugging
 @task
 def nginx(ctx, host):
@@ -489,7 +496,14 @@ def node_setup(c, application):
             f'su - main -c "cp {repo_folder}/dist-server/backend/config/continuous-integration.js {production_path}"'
         )
 
-    envvar_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{application.get('name')}"
+    crontab_setup(c, application)
+
+
+def crontab_setup(c, application):
+    app_name = application.get("name")
+    repo_folder = get_repository_folder(application)
+
+    envvar_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{app_name}"
     test = c.run(
         f"su - main -c \"crontab -l 2>/dev/null | grep -q '{repo_folder}/dist-server/backend/lib/stats'\"",
         warn=True,
@@ -499,11 +513,11 @@ def node_setup(c, application):
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
     test = c.run(
-        f"su - main -c \"crontab -l 2>/dev/null | grep -q '{repo_folder}/dist-server/backend/lib/email'\"",
+        f"su - main -c \"crontab -l 2>/dev/null | grep -q '{repo_folder}/backend/lib/email'\"",
         warn=True,
     )
     if test.exited:
-        cmd = f"8 4 * * * ({envvar_prefix} {repo_folder}/backend/lib/email.sh >> /var/log/main/emails.log 2>&1)"
+        cmd = f"8 4 * * * ({envvar_prefix} {repo_folder}/backend/lib/email.sh >> /var/log/main/{app_name}_emails.log 2>&1)"
         c.run(f"su - main -c '(crontab -l 2>/dev/null; echo \"{cmd}\") | crontab -'")
 
 
