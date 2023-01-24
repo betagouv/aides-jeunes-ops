@@ -528,7 +528,7 @@ def node_refresh(c, application, force=False):
 
 def node_restart(c, application):
     app_folder = get_application_folder(application)
-    c.run(f'su - main -c "pm2 startOrReload {app_folder}/pm2_config.yaml --update-env"')
+    c.run(f'su - main -c "pm2 startOrReload {app_folder}/pm2_config.yaml --update-env --node-args=\"-r esm\""')
 
 
 def get_venv_path_name(application):
