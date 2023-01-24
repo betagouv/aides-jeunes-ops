@@ -415,7 +415,7 @@ def node(c):
 
 
 def pm2(c):
-    c.run("npm install --global pm2@3.5.1")
+    c.run("npm install --global pm2@5.2.2")
     c.run("pm2 startup systemd -u main --hp /home/main")
 
     c.run('su - main -c "pm2 install pm2-logrotate"')
