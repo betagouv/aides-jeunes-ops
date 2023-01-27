@@ -415,7 +415,7 @@ def node(c):
 
 
 def pm2(c):
-    c.run("npm install --global pm2@3.5.1")
+    c.run("npm install --global pm2@5.2.2")
     c.run("pm2 startup systemd -u main --hp /home/main")
 
     c.run('su - main -c "pm2 install pm2-logrotate"')
@@ -424,8 +424,13 @@ def pm2(c):
 
 
 def python(c):
+    python_not_installed = c.run("python3 --version", warn=True).exited
+    if(python_not_installed):
+        c.run(
+            "apt-get install --assume-yes python3.7 python3.7-dev python3-pip"
+        )
     c.run(
-        "apt-get install --assume-yes python3.7 python3.7-dev python3-pip python3-venv"
+        "apt-get install --assume-yes python3-pip python3-venv"
     )
 
 
@@ -433,16 +438,12 @@ def python(c):
 def mongodb(c):
     result = c.run("apt-key list", hide=True)
     if True or "Mongo" not in result.stdout:
-        c.run(
-            "apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv 9DA31620334BD75D9DCB49F368818C72E52529D4"
-        )
-        c.run(
-            'echo "deb http://repo.mongodb.org/apt/debian stretch/mongodb-org/4.0 main" | tee /etc/apt/sources.list.d/mongodb-org.list'
-        )
+        c.run("wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -")
+        c.run("echo 'deb http://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/6.0 multiverse' | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list")
         c.run("apt-get update")
     else:
         print("MongoDB packages already setup")
-    c.run("apt-get install --assume-yes mongodb-org")
+    c.run("apt-get install -y mongodb-org")
     c.run("service mongod start")
     c.run("systemctl enable mongod")
 
@@ -482,11 +483,11 @@ def node_setup(c, application):
         c.put(fp, config_path)
         c.run(f"chown main:main {config_path}")
 
-    production_path = f"{repo_folder}/dist-server/backend/config/production.js"
+    production_path = f"{repo_folder}/backend/config/production.ts"
     result = c.run(f"[ -f {production_path} ]", warn=True)
     if result.exited:
         c.run(
-            f'su - main -c "cp {repo_folder}/dist-server/backend/config/continuous-integration.js {production_path}"'
+            f'su - main -c "cp {repo_folder}/backend/config/continuous-integration.ts {production_path}"'
         )
 
     envvar_prefix = f"NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{application.get('name')}"
@@ -520,6 +521,7 @@ def node_refresh(c, application, force=False):
     if force or startHash != refreshHash:
         envvar = f"NODE_ENV=production MES_AIDES_ROOT_URL=http{'s' if application['https'] else ''}://{ application['domain'] }"
         c.run(f'su - main -c "cd {folder} && npm ci"')
+        print(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         c.run(f'su - main -c "cd {folder} && {envvar} npm run prestart"')
         node_restart(c, application)
 
@@ -550,7 +552,7 @@ def openfisca_setup(c, application):
     venv_dir = get_venv_path_name(application)
     repo_folder = get_repository_folder(application)
     service_name = get_openfisca_service_name(application)
-    c.run(f'su - main -c "python3.7 -m venv {venv_dir}"')
+    c.run(f'su - main -c "python3 -m venv {venv_dir}"')
     with write_template(
         "files/openfisca.service.template",
         {
