@@ -1,8 +1,8 @@
-FROM debian:11
+FROM debian:11.6
 ENV container docker
 
 RUN apt-get update -y && apt-get dist-upgrade -y
-RUN apt-get install -y --no-install-recommends ssh sudo libffi-dev systemd openssh-client net-tools
+RUN apt-get install -y --no-install-recommends ssh sudo wget cron software-properties-common build-essential libffi-dev systemd openssh-client net-tools
 
 #RUN apt-get -y install puppet
 

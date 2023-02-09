@@ -2,8 +2,7 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-  #config.vm.box = "debian/buster64"
-  config.vm.box = "bobbye/debian_bullseye_arm64"
+  config.vm.box = "debian/buster64"
 
   # Guest have 500MB of RAM by default
   # That is not enough to `npm ci`
