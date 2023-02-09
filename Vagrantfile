@@ -2,28 +2,23 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-	# image for virtualbox on a x64 machine
-  config.vm.box = "debian/buster64"
-	# image for parallels (arm64 machine)
-  #config.vm.box = "bento/debian-11.2-arm64"
-	#config.vm.box_version = "202112.19.0"
-	#
-	# image for vmware (arm64 machine)
-	#config.vm.box = "bytesguy/debian-11-arm64"
-	config.vm.box_version = "1.0.0"
+  #config.vm.box = "debian/buster64"
+  config.vm.box = "bobbye/debian_bullseye_arm64"
+
   # Guest have 500MB of RAM by default
-	# That is not enough to `npm ci`
+  # That is not enough to `npm ci`
   # Upgrading to 4GB
   config.vm.provider :virtualbox do |vb|
-    vb.memory = 4000
+    vb.memory = 4096
   end
-	config.vm.provider :vmware_desktop do |vmware|
-		vmware.memory = 4000
-		# gui is required on vmware on mac M1/M2
-		vmware.gui = true
-		#vmware.vmx["ethernet0.pcislotnumber"] = "33"
-		vmware.vmx["memsize"] = "1024"
-		vmware.vmx["numvcpus"] = "1"
+
+  config.vm.provider "docker" do |docker, override|
+		override.vm.box = nil
+		docker.build_dir = "."
+		override.ssh.insert_key = true
+		docker.has_ssh = true
+		docker.privileged = true
+		docker.ports = ["22:22"]    
 	end
 
   # Faster startup
@@ -37,7 +32,8 @@ Vagrant.configure("2") do |config|
   config.vm.define "mes_aides_#{suffix}"
   config.vm.network "private_network", ip: current_private_ip
 
+
   # Replicate OVH initial provisioning
-  ssh_pub_key = File.read("#{ENV['HOME']}/.ssh/github_auth.pub").split("\n")[0]
-  config.vm.provision "shell", inline: "sudo su -c \"mkdir --parents /root/.ssh && echo {ssh_pub_key}-for-vagrant > /root/.ssh/authorized_keys\""
+  ssh_pub_key = File.read("#{ENV['HOME']}/.ssh/id_rsa.pub").split("\n")[0]
+  config.vm.provision "shell", inline: "sudo su -c \"mkdir --parents /root/.ssh && echo #{ssh_pub_key}-for-vagrant > /root/.ssh/authorized_keys\""
 end
