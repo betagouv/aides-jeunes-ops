@@ -13,7 +13,7 @@ RUN echo 'vagrant ALL = NOPASSWD: ALL' > /etc/sudoers.d/vagrant
 RUN chmod 440 /etc/sudoers.d/vagrant
 RUN mkdir -p /home/vagrant/.ssh
 RUN chmod 700 /home/vagrant/.ssh
-RUN curl https://raw.githubusercontent.com/hashicorp/vagrant/5b501a3fb05ed0ab16cf10991b3df9d231edb5cf/keys/vagrant.pub >> /home/vagrant/.ssh/authorized_keys
+RUN curl https://raw.githubusercontent.com/hashicorp/vagrant/master/keys/vagrant.pub >> /home/vagrant/.ssh/authorized_keys
 RUN chmod 600 /home/vagrant/.ssh/authorized_keys
 RUN chown -R vagrant:vagrant /home/vagrant/.ssh
 RUN sed -i -e 's/Defaults.*requiretty/#&/' /etc/sudoers
