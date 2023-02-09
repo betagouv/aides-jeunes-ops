@@ -81,8 +81,10 @@ That private key has been added to CirclecCI (aides-jeunes repository) to allow 
 
 Development is done using Vagrant and a Debian 10 (buster).
 
-The `vagrant up` command shoudl give you a VM in a similar environment as OVH **clean** instance.
+The `vagrant up` command should give you a VM in a similar environment as OVH **clean** instance.
 You have to run provisioning commands to set up the server.
+
+**Note: if you use an ARM based computer (for example a Mac with a M1/M2 processor), you need to use Docker as a VM provider and run `vagrant up --provider=docker`**
 
 ```
 SERVER=192.168.56.200
