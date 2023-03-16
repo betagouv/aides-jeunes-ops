@@ -1,0 +1,7 @@
+instance_name: aides-jeunes
+server_user_name: main
+server_user_group: aides_jeunes
+letsencrypt_environment: staging
+webroot_path: /var/www
+is_default: false
+challenge_proxy: false

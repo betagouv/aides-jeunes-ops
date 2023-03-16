@@ -1,0 +1,34 @@
+---
+- name: Initialize server ssh connection configuration
+  become: yes
+  hosts: all
+  tasks:
+    - name: Check that authorized_keys exists
+      ansible.builtin.stat:
+        path: ~/.ssh/authorized_keys
+      register: authorized_keys
+      become_user: "{{ ansible_ssh_user }}"
+    - name: Fail if authorized_keys is missing or empty
+      ansible.builtin.fail:
+        msg: "authorized_keys file is either missing or empty {{authorized_keys.stat.size}}"
+      when: authorized_keys.stat.size == 0
+    - name: Disable SSH password authentication
+      become: true
+      become_method: sudo
+      block:
+        - name: Disallow SSH password authentication
+          lineinfile:
+            dest: /etc/ssh/sshd_config
+            regexp: "{{item.regex}}"
+            line: "{{item.line}}"
+            state: present
+          loop:
+            - regex: "^PasswordAuthentication"
+              line: "PasswordAuthentication no"
+            - regex: "^ChallengeResponseAuthentication"
+              line: "ChallengeResponseAuthentication no"
+            - regex: "^UsePAM"
+              line: "UsePAM no"
+        - name: "restart sshd"
+          ansible.builtin.command: >
+            /etc/init.d/ssh reload

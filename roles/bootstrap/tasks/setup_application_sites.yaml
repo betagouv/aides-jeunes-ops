@@ -1,0 +1,68 @@
+- set_fact:
+    application_folder: "/home/{{ server_user_name }}/{{ item.name }}"
+    repository_folder: "/home/{{ server_user_name }}/{{ item.name }}/repository"
+    envvar_prefix: "NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{{ item.name }}"
+    venv_dir: "/home/{{ server_user_name }}/{{ item.name }}/venv"
+    openfisca_service_name: "{{ item.name }}_openfisca"
+- name: Fetch repository and sets Cron jobs for {{ item.name }}
+  block:
+    - name: Create application folder
+      file:
+        path: "{{ application_folder }}"
+        state: directory
+        owner: "{{ server_user_name }}"
+        group: "{{ server_user_group }}"
+    - name: Clone application repository
+      become_user: "{{ server_user_name }}"
+      ansible.builtin.git:
+        repo: "{{ item.repository }}"
+        dest: "{{ repository_folder }}"
+        single_branch: yes
+        version: "{{ item.branch | default('master') }}"
+    - name: Setup pm2 for application
+      template:
+        src: "templates/pm2_config.yaml.j2"
+        dest: "{{ application_folder }}/pm2_config.yaml"
+        owner: "{{ server_user_name }}"
+        group: "{{ server_user_group }}"
+    - name: Create configuration file if it doesn't exists
+      ansible.builtin.copy:
+        src: "{{repository_folder}}/backend/config/continuous-integration.ts"
+        dest: "{{repository_folder}}/backend/config/production.ts"
+        mode: preserve
+        remote_src: yes
+        force: no
+    - name: Add a cron job for stats generation
+      become_user: "{{ server_user_name }}"
+      ansible.builtin.cron:
+        name: "generate stats for {{ item.name }}"
+        minute: "23"
+        hour: "2"
+        job: "({{ envvar_prefix }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/stats)"
+    - name: Add a cron job to send email
+      become_user: "{{ server_user_name }}"
+      ansible.builtin.cron:
+        name: "send email for {{ item.name }}"
+        minute: "8"
+        hour: "4"
+        job: "({{ envvar_prefix }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/email.js send survey --multiple 1000 >> /var/log/main/emails.log)"
+  when: true
+- name: Setup Openfisca
+  block:
+    - name: Create Python virtual env
+      become_user: "{{ server_user_name }}"
+      command:
+        cmd: "python3.8 -m venv {{venv_dir}}"
+    - name: Setup openfisca service
+      template:
+        src: "templates/openfisca.service.j2"
+        dest: "/etc/systemd/system/{{ openfisca_service_name }}.service"
+      notify: reload systemd
+    - name: Reload openfisca
+      include_tasks: openfisca_reload.yaml
+      vars:
+        - service_name: "{{ openfisca_service_name }}"
+    - name: Enable openfisca service
+      command:
+        cmd: "systemctl enable {{ openfisca_service_name }}"
+

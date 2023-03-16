@@ -1,0 +1,10 @@
+- name: "create default site config ({{item.name}})"
+  block:
+    - include_tasks: nginx_application_sites.yaml
+      vars:
+        - site_name: "{{fullname}}"
+        - is_default: true
+    - name: "register default app {{item.name}}"
+      ansible.builtin.set_fact:
+        default_app: "{{item.name}}"
+  when: default_app is not defined

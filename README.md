@@ -1,123 +1,99 @@
-# Mes Aides ops
+# Aides-Jeunes Ops
 
-Set up the [Mes Aides](https://mes-aides.1jeune1solution.beta.gouv.fr) stack.
+Set up the [Mes Aides](https://mes-aides.1jeune1solution.beta.gouv.fr/) stack.
 
-> Déploie l'infrastructure de Mes Aides.
+## Before starting
 
+The ansible scripts in this repository have been tested only Debian 11 x86_64 server. However, older or newer versions of Debian may be compatible.
 
-## Initial provisioning
+## Deployment
 
-Prerequisite:
-- Python 3 and virtualenv
-- An SSH connection to the root user of the remote server
+### Prerequisites
 
+You will need at most the following ressources:
+- an SSH connection as a priviledged user to the remote server
+- Ansible installed on your local machine. See [the documentation](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html#installing-ansible-on-specific-operating-systems) for your operating system.
 
-```
-SERVER=51.91.78.117
-NAME=wiru
-ssh root@$SERVER -C date
+Then, duplicate the file `vps.yaml` in the `inventories` folder and modifiy it to match your needs.
 
-cp aides_jeunes_fabric.yml fabric.yml
-
-virtualenv .venv37 --python=python3.7
-source .venv37/bin/activate
-pip install --requirement requirements.txt --upgrade
-
-ssh-add ~/.ssh/id_rsa
-fab bootstrap --host $SERVER
-fab provision --host $SERVER --name $NAME
-# fab provision --host $SERVER --name $NAME --dns-ok # Once DNS have been updated
-```
-
-## Deploy project (Aides-Jeunes)
-
-### Installation for deployment
-
-In your machine clone aides-jeunes-ops and run the following command:
-
-```
-cp aides_jeunes_fabric.yml fabric.yml
-
-virtualenv .venv37 --python=python3.7
-source .venv37/bin/activate
-pip install --requirement requirements.txt --upgrade
-```
-
-If you are using MacOS with a M1 processor, you need to use a version of Python superior or equal to `Python 3.9.7` in  order to be able to install and use `Fabric`.
-
-### Update production provisioning
-
-Run the following command in your machine:
-
-```
-fab sync --host=mes-aides.1jeune1solution.beta.gouv.fr
+The options are as follow :
+```yaml
+virtualmachines:
+  hosts:
+    vps:
+      ansible_host: vps-45bb7a36.vps.ovh.net                             # The server adress  
+      ansible_port: 22                                                   # The ssh port used to connect to the server
+      ansible_ssh_user: debian                                           # The user name of the priviledged account on the server
+      ansible_ssh_private_key_file: ~/.ssh/id_rsa                        # The path to the SSH key used to connect to the server
+      ansible_host_ip: 51.38.232.135                                     # The ip of the server, used to generate DNS records
+      fullname: solstice.aides-jeunes.leonides.org                       # 
+      dns_root: leonides.org                                             # The root of domain name use by your server
+      email: random-email@leonides.org                                   # The email used to register Certbot
+      github_users:                                                      # The github users that will be able to connect to the server
+        - Cugniere
+      applications:                                                      # List all applications that will be deployed
+        - name: aides_jeunes
+          repository: https://github.com/betagouv/aides-jeunes.git
+          branch: master
+          default_site: true
+          https: true
+          domain: aides-jeunes.leonides.org
+          node_server_port: 8001
+          node_instance_number: 4
+          openfisca_server_port: 2001
+          openfisca_worker_number: 4
 ```
 
-### Run provisioning from personal computer
+### Basic security settings (non mandatory)
 
-Run the following command in your machine:
+You can set some basic security settings on your server by running `ansible-playbook -i ./inventories/vps.yaml initialize.yaml`.
 
+This will disable SSH connection to the server using password. This step will not run if the server user file `~/.ssh/authorized_keys` is either empty or missing. The following properties will be modified in `/etc/ssh/sshd_config` :
+- set `PasswordAuthentication no` 
+- set `ChallengeResponseAuthentication no`
+- set `UsePAM no`
+
+It is advised to run this command on a newly installed and if you understand the implication of those parameters. Your hosting service should provide you with an emergency access if you get locked out of the server.
+
+### Listing required DNS record
+
+In order for the server to be successfully deployed, some sub domain name must be specified in the DNS record. In order to know which values are required, simply run `ansible-playbook -i ./inventories/vps.yaml dns-record.yaml`. You will get an output such as this one:
 ```
-fab refresh
-```
-
-cf. files/update.sh and deploy CircleCI workflow in main repository
-
-#### Secret environment variables
-
-The main NodeJS server needs some private variables for production, stored at '/home/main/aides-jeunes/backend/config/production.js'
-
-These variables can be fetched from the current production server with `fab production-config-get`, _--host_ can be specified but default to _mes-aides.1jeune1solution.beta.gouv.fr_. Then the configuration file can be put on another server with `fab production-config-put --host <hostname>`.
-
-
-#### Continuous deployment
-
-An private key can `ssh` to the host and it will automatically deploy the application latest version.
-
-That private key has been added to CirclecCI (aides-jeunes repository) to allow continuous deployment.
-
-
-## Development
-
-Development is done using Vagrant and a Debian 10 (buster).
-
-The `vagrant up` command shoudl give you a VM in a similar environment as OVH **clean** instance.
-You have to run provisioning commands to set up the server.
-
-```
-SERVER=192.168.56.200
-NAME=testa
-ssh root@$SERVER -C date
-
-virtualenv .venv37 --python=python3.7
-source .venv37/bin/activate
-pip install --requirement requirements.txt --upgrade
-
-cp aides_jeunes_fabric.yml fabric.yml
-
-ssh-add ~/.ssh/id_rsa
-fab bootstrap --host $SERVER
-fab provision --host $SERVER
+solstice.aides-jeunes                              3600 IN A 5.135.137.147
+monitor.solstice.aides-jeunes                      3600 IN A 5.135.137.147
+solstice.aides-jeunes                              3600 IN A 5.135.137.147
+www.solstice.aides-jeunes                          3600 IN A 5.135.137.147
+openfisca.solstice.aides-jeunes                    3600 IN A 5.135.137.147
+aides-jeunes                                       3600 IN A 5.135.137.147
+www.aides-jeunes                                   3600 IN A 5.135.137.147
+openfisca.aides-jeunes                             3600 IN A 5.135.137.147
 ```
 
+Then you will have to add all those entries to the associated domain name DNS record.
 
-Currently, it gives you:
-- A MongoDB instance with default settings.
-- Mes Aides on port 8000 (ExpressJS application).
-- OpenFisca on port 2000 (Python via gunicorn).
-- A basic monitor server
+### Synchronize Ops repository
 
-And via nginx :
-- the application as a default server and on 4 host names:
-    - (www\.)?(<prefix>\.)?mes-aides.1jeune1solution.beta.gouv.fr,
-- OpenFisca on 2 host names:
-    - (openfisca.)?(<prefix>\.)?mes-aides.1jeune1solution.beta.gouv.fr,
-- the monitor on 2 host names:
-    - (monitor.)?(<prefix>\.)?mes-aides.1jeune1solution.beta.gouv.fr,
+In order to be able to refresh tasks on the server, you will need to synchronize the content of this repository on your server. Once a continuous deployment pipeline connect to your server it will (in a near future) fetch the latest version of the branch used by the application.
 
-HTTPS (and associated redirection) is setup if Let's Encrypt certificates are availables (3 set of certificates)
+Run `ansible-playbook -i ./inventories/vps.yaml synchronize.yaml` to create an exact copy of this repository in the folder `/opt/mes-aides/ops` of your server.
 
-# Monitor
+### Bootstrap server stack
 
-Two different scanning services are used, in order to remove dependency on one specific provider to notify in case of a service failure.
-This endpoint is scanned by [UptimeRobot](https://uptimerobot.com) on a 1-minute interval, and will notify the team through Slack and SMS. It is also scanned on a 2-minute interval by [SetCronJob](https://www.setcronjob.com) which will notify the team by email. The SetCronJob instance has to be manually rearmed (i.e. re-enabled after it gets automatically disabled on failure) when it has been triggered.
+Run the command `ansible-playbook -i ./inventories/vps.yaml bootstrap.yaml` in order to bootstrap the server basic configuration.
+
+Once done, every applications should be up and running on the server.
+
+Note that you only need to run this command once, but you can re-run it if you modify either Nginx, Python, Mongo configuration or if the bootstrap process failed at some point. All unaltered steps that ran successfully will be automatically skipped by Ansible.
+
+### Update SSH access
+
+To manage the access to the server through ssh, run the command `ansible-playbook -i ./inventories/vps.yaml ssh-access.yaml`.
+
+This will automatically allow all the users specified in the `github` section of the configuration to connect to the server with their respective private key used to identify to github.
+
+This will also add the public key currently used to connect to the server with Ansible.
+
+
+# Local development
+
+**work in progress**

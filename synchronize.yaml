@@ -1,0 +1,25 @@
+---
+- name: Synchronize Ops repository with server
+  become: yes
+  hosts: all
+  tasks:
+    - name: "install rsync on host"
+      apt:
+        name: ['rsync']
+        state: present
+    - name: "install ansible on host"
+      pip:
+        name: ansible
+    - name: "create server-side ops directory"
+      file:
+        path: /opt/mes-aides/
+        state: directory
+    - name: "synchronize"
+      become: true
+      become_method: sudo
+      synchronize:
+        src: ./
+        dest: /opt/mes-aides/ops
+        recursive: true
+        rsync_opts:
+          - "--exclude={.git,.venv,.vagrant}"

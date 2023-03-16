@@ -1,0 +1,189 @@
+## Initialize
+- name: Initialize server
+  block:
+  - name: "set server hostname"
+    hostname:
+      name: "{{fullname}}"
+    when: fullname is defined
+  - name: "apt-get update"
+    apt:
+      update_cache: yes
+      cache_valid_time: 3600
+  - name: "install maintenance tools"
+    apt:
+      name: ['htop', 'vim']
+      state: present
+  - name: "install build tools"
+    apt:
+      name: ['rsync', 'python3-pip', 'build-essential', 'git', 'man', 'ntp']
+      state: present
+  - name: "add gnupg in order to add PPA with apt" # required for node, python, mongo
+    apt:
+      name: ["gnupg"]
+      state: present
+      install_recommends: no
+  - name: "set timezone to Europe/Paris"
+    community.general.timezone:
+      name: Europe/Paris
+  - name: create a user group
+    ansible.builtin.group:
+      name: "{{ server_user_group }}"
+      state: present
+  - name: create user {{ server_user_name }}
+    ansible.builtin.user:
+      name: "{{ server_user_name }}"
+      group: "{{ server_user_group }}"
+      shell: /bin/bash
+    register: server_user
+  - name: create user {{ server_user_name }} log directory
+    file:
+      path: /var/log/{{ server_user_name }}
+      state: directory
+      mode: '0644'
+      owner: "{{ server_user_name }}"
+      group: "{{ server_user_group }}"
+  when: true
+
+## Setup nginx
+- name: Setup nginx
+  block:
+    - name: "install nginx"
+      apt:
+        name: ['nginx']
+        state: present
+    - name: "create www directory"
+      file:
+        path: /var/www/{{ item["domain"] }}
+        state: directory
+        mode: '0644'
+        owner: "{{ server_user_name }}"
+        group: "{{ server_user_group }}"
+      loop: "{{ applications }}"
+    - name: "delete default nginx site"
+      file:
+        path: /etc/nginx/{{ item }}/default
+        state: absent
+      with_items:
+        - "sites-enabled"
+        - "sites-available"
+      notify: restart nginx
+    - name: "copy nginx site configuration"
+      template:
+        src: "{{item.src}}"
+        dest: "{{item.dest}}"
+        mode: '0744'
+      loop:
+        - src: templates/nginx_ssl_params.conf.j2
+          dest: /etc/nginx/snippets/ssl_params.conf
+        - src: templates/nginx_upstream.conf.j2
+          dest: /etc/nginx/conf.d/upstreams.conf
+        - src: templates/nginx_static.conf.j2
+          dest: /etc/nginx/snippets/mes-aides-static.conf # should be {{instance_name}}
+      notify: restart nginx
+    - name: generate DH Parameters
+      community.crypto.openssl_dhparam:
+        path: /etc/ssl/private/dhparam.pem
+        size: 2048
+  when: true
+
+## Setup node
+- name: Install nodeJS 16.x
+  block:
+    - name: "add nodejs apt key"
+      apt_key:
+        url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+        state: present
+    - name: "add nodejs 16.x ppa for apt repo"
+      apt_repository:
+        repo: deb https://deb.nodesource.com/node_16.x bullseye main
+        update_cache: yes
+    - name: "install nodejs"
+      apt:
+        update_cache: yes
+        name: nodejs
+        state: present
+  when: true
+
+## Setup pm2
+- name: Install and configure pm2
+  block:
+    - name: "install pm2 package"
+      npm:
+        name: pm2
+        version: '5.2'
+        global: yes
+        state: present
+        production: yes
+    - name: "auto start pm2 for user {{ server_user_name }}"
+      command: pm2 startup systemd -u {{ server_user_name }} --hp /home/{{ server_user_name }}
+    - name: "setup logrotate for pm2"
+      become_user: "{{ server_user_name }}"
+      command: "{{item}}"
+      loop:
+        - pm2 install pm2-logrotate
+        - pm2 set pm2-logrotate:max_size 50M
+        - pm2 set pm2-logrotate:compress true
+  when: true
+
+## Setup Python
+- name: Install python 3.8
+  block:
+    - name: "install python 3.8"
+      include_tasks: install_python.yaml
+    - name: "install python 3.8 packages requirements "
+      apt:
+        update_cache: yes
+        name:
+          - python3-dev
+          - python3-venv
+          - build-essential
+        state: present
+  when: true
+
+## Setup Mongo
+- name: Install mongoDB 6.x
+  include_tasks: install_mongodb.yaml
+  when: true
+
+
+## Setup Let's encrypt / Certbot
+- name: Setup Certbot
+  block:
+    - name: "install certbot"
+      apt:
+        name: ['certbot']
+        state: present
+    - name: "register certbot"
+      ansible.builtin.command: >
+        certbot register
+        --non-interactive
+        --agree-tos
+        --email {{ email }}
+      register: certbot_register
+      failed_when: "'Account registered' not in certbot_register.stdout and 'registration of a duplicate account' not in certbot_register.stderr"
+  when: true
+
+## Provision and setup all applications
+- name: Setup all applications
+  block:
+    - name: "setup default application site"
+      include_tasks: nginx_application_default_site.yaml
+      with_items: "{{ applications }}"
+      when: not(item.default_site is not defined or item.default_site is false)
+    - name: "setup monitoring site"
+      include_tasks: nginx_site.yaml
+      vars:
+        - name: "monitor.{{ fullname }}"
+        - upstream_name: "monitor"
+      when: true
+    - name: "provision tasks"
+      include_tasks: nginx_application_sites.yaml
+      with_items: "{{ applications }}"
+      when: true
+    - name: "setup all applications sites"
+      include_tasks: setup_application_sites.yaml
+      with_items: "{{ applications }}"
+    - name: "refresh applications"
+      include_tasks: refresh_tasks.yaml
+  when: true
+

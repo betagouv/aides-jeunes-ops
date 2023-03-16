@@ -1,0 +1,36 @@
+- name: "nginx create site"
+  block:
+    - name: check that fullchain.pem certificate exists
+      stat:
+        path: "/etc/letsencrypt/live/{{ name }}/fullchain.pem"
+      register: certificate
+    - name: generate certificate if missing
+      block:
+        - name: add www subdomain if required
+          when: add_www_subdomain | default(false)
+          ansible.builtin.set_fact:
+            certbot_www_option: " --expand -d www.{{name}}"
+        - name: issue or renew an SSL certificate with Let's Encrypt
+          ansible.builtin.command: >
+            certbot certonly
+            --webroot
+            --non-interactive
+            --cert-name {{name}}
+            -d {{name}}
+            {{ certbot_staging_option | default() }}
+            --webroot-path {{webroot_path}}
+          register: lets_encrypt_success
+          ignore_errors: true
+        - debug:
+            msg: "[WARNING] Let's encrypt certificate generation failed"
+          when: lets_encrypt_success.failed
+      when: not certificate.stat.exists
+    - name: set SSL state
+      ansible.builtin.set_fact:
+        ssl_exists: "{{ lets_encrypt_success.failed is not defined or lets_encrypt_success.failed is false }}"
+    - name: "copy nginx application configuration {{ name }}"
+      template:
+        src: "templates/nginx_config.conf.j2"
+        dest: "/etc/nginx/sites-enabled/{{ name }}.conf"
+        mode: '0744'
+      notify: restart nginx

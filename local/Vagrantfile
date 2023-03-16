@@ -3,13 +3,22 @@
 
 Vagrant.configure("2") do |config|
   config.vm.box = "debian/buster64"
-
+  
   # Guest have 500MB of RAM by default
   # That is not enough to `npm ci`
   # Upgrading to 4GB
   config.vm.provider :virtualbox do |vb|
     vb.memory = 4096
   end
+
+  config.vm.provider "docker" do |docker, override|
+		override.vm.box = nil
+		docker.build_dir = "."
+		override.ssh.insert_key = true
+		docker.has_ssh = true
+		docker.privileged = true
+		docker.ports = ["22:22"]    
+	end
 
   # Faster startup
   config.vm.synced_folder ".", "/vagrant", disabled: true
@@ -21,6 +30,7 @@ Vagrant.configure("2") do |config|
   puts "This instance will be reachable at #{current_private_ip}"
   config.vm.define "mes_aides_#{suffix}"
   config.vm.network "private_network", ip: current_private_ip
+
 
   # Replicate OVH initial provisioning
   ssh_pub_key = File.read("#{ENV['HOME']}/.ssh/id_rsa.pub").split("\n")[0]

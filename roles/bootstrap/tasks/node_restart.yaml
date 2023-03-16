@@ -1,0 +1,4 @@
+- name: pm2 restart {{item.name}}
+  become_user: "{{ server_user_name }}"
+  block:
+    - shell: "pm2 startOrReload {{ application_folder }}/pm2_config.yaml --update-env"

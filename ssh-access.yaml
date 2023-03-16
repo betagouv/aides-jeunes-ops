@@ -1,0 +1,6 @@
+---
+- name: Manage ssh access on server
+  become_user: "{{ ansible_ssh_user }}"
+  hosts: all
+  roles:
+    - ssh-access

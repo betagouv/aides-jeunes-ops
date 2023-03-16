@@ -1,3 +1,4 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
 # MANAGED BY MES AIDES OPS
 # Modifications should be made in that template
 
@@ -38,7 +39,7 @@
 # REDIRECT HTTP TRAFFIC ON {{ name }} TO HTTPS
 server {
 
-  listen              *:80{% if default_server %} default_server{% endif %};
+  listen              *:80{% if false and is_default %} default_server{% endif %};
   server_name         {{ name }};
 
   {{ well_known_section(webroot_path, challenge_proxy) }}
@@ -49,7 +50,7 @@ server {
 }
 {% endif %}
 
-{% if add_www_subdomain %}
+{% if add_www_subdomain is defined and add_www_subdomain %}
   {% if ssl_exists %}
 # REDIRECT HTTP TRAFFIC ON www.{{ name }} TO {{ name }} ON HTTPS
 server {
@@ -122,7 +123,7 @@ server {
                       text/xml;
   gzip_vary           on;
 
-  {% if nginx_root %}
+  {% if nginx_root is defined and nginx_root %}
   root {{ nginx_root }};
 
   include snippets/mes-aides-static.conf;

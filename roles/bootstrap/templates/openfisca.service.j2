@@ -1,0 +1,13 @@
+[Unit]
+Description=Service in charge of OpenFisca Web API for {{ item.name }}
+
+[Service]
+User={{ server_user_name }}
+Group={{ server_user_group }}
+Environment="OPENFISCA_WORKERS={{ item.openfisca_worker_number | default(3) }}" "OPENFISCA_PORT={{ item.openfisca_server_port }}"
+WorkingDirectory={{ repository_folder }}/openfisca
+ExecStart={{ venv_dir }}/bin/gunicorn api --config config.py
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target

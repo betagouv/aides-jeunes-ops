@@ -1,0 +1,27 @@
+- set_fact:
+    application_folder: "/home/{{ server_user_name }}/{{ item.name }}"
+    repository_folder: "/home/{{ server_user_name }}/{{ item.name }}/repository"
+    envvar_prefix: "NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{{ item.name }}"
+    venv_dir: "/home/{{ server_user_name }}/{{ item.name }}/venv"
+    openfisca_service_name: "{{ item.name }}_openfisca"
+    envvar: "NODE_ENV=production MES_AIDES_ROOT_URL=http{{'s' if item.https }}://{{ item.domain }}"
+- name: Node refresh application {{ item.name }}
+  block:
+    - name: get variables
+      become_user: "{{ server_user_name }}"
+      block:
+        - shell: "cd {{ repository_folder }} && git rev-parse HEAD"
+          register: start_hash
+        - shell: "cd {{ repository_folder }} && git rev-parse --abbrev-ref HEAD"
+          register: branch
+        - shell: "cd {{ repository_folder }} && git fetch --all && git reset --hard origin/{{ branch.stdout }}"
+        - shell: "cd {{ repository_folder }} && git rev-parse HEAD"
+          register: current_hash
+- name: install npm packages and restart server
+  become_user: "{{ server_user_name }}"
+  block:
+    - shell: "cd {{ repository_folder }} && npm ci"
+    - shell: "cd {{ repository_folder }} && npm run prestart"
+    - include_tasks: node_restart.yaml
+    - include_tasks: openfisca_refresh.yaml
+  when: force is not undefined or current_hash.stdout != start_hash.stdout

@@ -1,0 +1,16 @@
+- name: setup server ssh access
+  block:
+    - name: Set authorized_keys for users
+      authorized_key:
+        user: "{{ ansible_ssh_user }}"
+        state: present
+        comment: "# Root key for local connection"
+        key: "{{ lookup('file', ansible_ssh_private_key_file + '.pub') }}"
+        exclusive: true
+    - name: Set authorized_keys for users
+      authorized_key:
+        user: "{{ ansible_ssh_user }}"
+        state: present
+        comment: "# User key for {{item}}"
+        key: "https://github.com/{{item}}.keys"
+      with_items: "{{ github_users }}"

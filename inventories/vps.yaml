@@ -1,0 +1,28 @@
+virtualmachines:
+  hosts:
+    vps:
+      ansible_host: vps-45bb7a36.vps.ovh.net
+      ansible_port: 22
+      ansible_ssh_user: debian
+      ansible_ssh_private_key_file: ~/.ssh/github_auth
+      ansible_host_ip: 51.38.232.135
+      fullname: solstice.aides-jeunes.leonides.org
+      dns_root: leonides.org
+      email: random-email@leonides.org
+      github_users:
+        - baptou12
+        - Cugniere
+        - guillett
+        - Shamzic
+        - Valandr
+      applications:
+        - name: aides_jeunes
+          repository: https://github.com/betagouv/aides-jeunes.git
+          branch: master
+          default_site: true
+          https: true
+          domain: aides-jeunes.leonides.org
+          node_server_port: 8001
+          node_instance_number: 4
+          openfisca_server_port: 2001
+          openfisca_worker_number: 4

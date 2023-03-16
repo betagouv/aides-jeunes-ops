@@ -1,0 +1,6 @@
+---
+- name: Install Aides-Jeunes Ops on server
+  become: yes
+  hosts: all
+  roles:
+    - bootstrap

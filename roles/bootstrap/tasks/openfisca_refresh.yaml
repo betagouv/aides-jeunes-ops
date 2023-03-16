@@ -1,0 +1,5 @@
+- name: openfisca refresh
+  become_user: "{{ server_user_name }}"
+  block:
+    - shell: "{{ venv_dir }}/bin/pip3 install --upgrade pip"
+    - shell: "cd {{ repository_folder }} && {{ venv_dir }}/bin/pip3 install --upgrade -r openfisca/requirements.txt"

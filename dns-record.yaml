@@ -1,0 +1,22 @@
+---
+- name: List required DNS records for inventory
+  hosts: all
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: "Generate DNS record"
+      debug:
+        msg: |
+          {% set items = [fullname, "monitor."+fullname] -%}
+          {% set prefix = ["", "www.", "openfisca."] -%}
+          {% for domain in prefix -%}
+            {{ items.append(domain+fullname) -}}
+          {% endfor %}
+          {% for domain in prefix -%}
+            {% for application in applications -%}
+              {{ items.append(domain+application["domain"]) -}}
+            {% endfor %}
+          {% endfor %}
+          {% for item in items -%}
+            {{ "{:<50} {}".format(item.replace("."+dns_root, ""), "3600 IN A "+ansible_host_ip) }}
+          {% endfor %}

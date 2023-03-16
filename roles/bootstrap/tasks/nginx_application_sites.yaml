@@ -1,0 +1,14 @@
+- name: "create node application for {{ site_name | default(item.domain) }} "
+  include_tasks: nginx_site.yaml
+  vars:
+    - name: "{{ site_name | default(item.domain) }}"
+    - dname: "{{ site_name | default(item.domain) }}"
+    - add_www_subdomain: true
+    - upstream_name: "{{ item.name }}_node"
+    - nginx_root: "/home/{{ server_user_name }}/{{ item.name }}/repository"
+- name: "create node application for {{ site_name | default(item.domain) }} "
+  include_tasks: nginx_site.yaml
+  vars:
+    - name: "openfisca.{{ site_name | default(item.domain) }}"
+    - upstream_name: "{{ item.name }}_openfisca"
+    - is_default: false

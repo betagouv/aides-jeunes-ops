@@ -1,0 +1,37 @@
+virtualmachines:
+  hosts:
+    aides_jeunes_staging:
+      ansible_host: localhost
+      ansible_port: 2222
+      ansible_ssh_user: root
+      ansible_ssh_private_key_file: ~/.ssh/github_auth
+      ansible_host_ip: 51.38.232.135
+      fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
+      dns_root: beta.gouv.fr
+      email: prenom.nom@beta.gouv.fr
+      github_users:
+        - Cugniere
+        - guillett
+        - Shamzic
+        - Valandr
+      applications:
+        - name: aides_jeunes
+          repository: https://github.com/betagouv/aides-jeunes.git
+          branch: master
+          default_site: true
+          https: false
+          domain: mes-aides.1jeune1solution.beta.gouv.fr
+          node_server_port: 8001
+          node_instance_number: 4
+          openfisca_server_port: 2001
+          openfisca_worker_number: 4
+        - name: aides_jeunes_preprod
+          repository: https://github.com/betagouv/aides-jeunes.git
+          branch: dev
+          default_site: false
+          https: false
+          domain: preprod.mes-aides.incubateur.net
+          node_server_port: 8002
+          node_instance_number: 2
+          openfisca_server_port: 2002
+          openfisca_worker_number: 2

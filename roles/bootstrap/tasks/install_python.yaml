@@ -1,0 +1,33 @@
+- name: Install python 3.8.16
+  block:
+    - name: Test if Python 3.8 is already installed
+      shell:
+        cmd: which python3.8
+      register: python_installed
+      failed_when: "python_installed.rc not in [0,1]"
+    - name: "Manually install Python 3.8"
+      block:
+        - name: "add packages required to install python"
+          apt:
+            state: present
+            name:
+              - build-essential
+              - checkinstall
+              - libncursesw5-dev
+              - libssl-dev
+              - libsqlite3-dev
+              - tk-dev
+              - libgdbm-dev
+              - libc6-dev
+              - libbz2-dev
+              - libffi-dev
+              - zlib1g-dev
+        - name: "download and build"
+          become: true
+          become_method: sudo
+          block:
+            - shell: "cd /opt && wget https://www.python.org/ftp/python/3.8.16/Python-3.8.16.tgz"
+            - shell: "cd /opt && tar xzf Python-3.8.16.tgz"
+            - shell: "cd /opt/Python-3.8.16/ && ./configure --enable-optimizations"
+            - shell: "cd /opt/Python-3.8.16/ && make altinstall"
+      when: "true or python_installed.stdout | length > 0"
