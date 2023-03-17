@@ -4,7 +4,7 @@
   - name: "set server hostname"
     hostname:
       name: "{{fullname}}"
-    when: fullname is defined
+    ignore_errors: true
   - name: "apt-get update"
     apt:
       update_cache: yes
@@ -107,6 +107,11 @@
 ## Setup pm2
 - name: Install and configure pm2
   block:
+    - name: Test if pm2 is already installed
+      shell:
+        cmd: which pm2
+      register: pm2_installed
+      failed_when: "pm2_installed.rc not in [0,1]"
     - name: "install pm2 package"
       npm:
         name: pm2
@@ -114,6 +119,7 @@
         global: yes
         state: present
         production: yes
+      when: "pm2_installed.stdout | length == 0"
     - name: "auto start pm2 for user {{ server_user_name }}"
       command: pm2 startup systemd -u {{ server_user_name }} --hp /home/{{ server_user_name }}
     - name: "setup logrotate for pm2"
@@ -123,7 +129,6 @@
         - pm2 install pm2-logrotate
         - pm2 set pm2-logrotate:max_size 50M
         - pm2 set pm2-logrotate:compress true
-  when: true
 
 ## Setup Python
 - name: Install python 3.8
@@ -138,12 +143,10 @@
           - python3-venv
           - build-essential
         state: present
-  when: true
 
 ## Setup Mongo
 - name: Install mongoDB 6.x
   include_tasks: install_mongodb.yaml
-  when: true
 
 
 ## Setup Let's encrypt / Certbot
@@ -161,7 +164,6 @@
         --email {{ email }}
       register: certbot_register
       failed_when: "'Account registered' not in certbot_register.stdout and 'registration of a duplicate account' not in certbot_register.stderr"
-  when: true
 
 ## Provision and setup all applications
 - name: Setup all applications
@@ -175,15 +177,12 @@
       vars:
         - name: "monitor.{{ fullname }}"
         - upstream_name: "monitor"
-      when: true
     - name: "provision tasks"
       include_tasks: nginx_application_sites.yaml
       with_items: "{{ applications }}"
-      when: true
     - name: "setup all applications sites"
       include_tasks: setup_application_sites.yaml
       with_items: "{{ applications }}"
     - name: "refresh applications"
       include_tasks: refresh_tasks.yaml
-  when: true
 

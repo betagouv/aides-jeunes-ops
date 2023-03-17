@@ -23,11 +23,11 @@
           ignore_errors: true
         - debug:
             msg: "[WARNING] Let's encrypt certificate generation failed"
-          when: lets_encrypt_success.failed
-      when: not certificate.stat.exists
+          when: "(https | default(false)) and lets_encrypt_success.failed"
+      when: (not certificate.stat.exists) and (https | default(false))
     - name: set SSL state
       ansible.builtin.set_fact:
-        ssl_exists: "{{ lets_encrypt_success.failed is not defined or lets_encrypt_success.failed is false }}"
+        ssl_exists: "{{ (https | default(false)) and (lets_encrypt_success.failed is not defined or lets_encrypt_success.failed is false) }}"
     - name: "copy nginx application configuration {{ name }}"
       template:
         src: "templates/nginx_config.conf.j2"

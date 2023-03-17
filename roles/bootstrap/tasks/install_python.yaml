@@ -30,4 +30,4 @@
             - shell: "cd /opt && tar xzf Python-3.8.16.tgz"
             - shell: "cd /opt/Python-3.8.16/ && ./configure --enable-optimizations"
             - shell: "cd /opt/Python-3.8.16/ && make altinstall"
-      when: "true or python_installed.stdout | length > 0"
+      when: "python_installed.stdout | length == 0"

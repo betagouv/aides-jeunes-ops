@@ -26,3 +26,4 @@
       ansible.builtin.systemd:
         name: mongod
         enabled: true
+        daemon_reload: yes

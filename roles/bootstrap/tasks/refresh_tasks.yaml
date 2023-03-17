@@ -11,5 +11,7 @@
           with_items: "{{ applications }}"
           vars:
             - force: true
-        #- name: openfisca refresh app
+        - name: openfisca refresh app
+          include_tasks: openfisca_refresh.yaml
+          with_items: "{{ applications }}"
       

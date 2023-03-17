@@ -20,6 +20,11 @@ RUN sed -i -e 's/\(UsePAM \)yes/\1 no/' /etc/ssh/sshd_config
 # Start SSH
 RUN mkdir /var/run/sshd
 EXPOSE 22
+EXPOSE 8001
+EXPOSE 8002
+EXPOSE 2001
+EXPOSE 2002
+EXPOSE 27017
 RUN /usr/sbin/sshd
 
 CMD ["/lib/systemd/systemd", "-D"]
