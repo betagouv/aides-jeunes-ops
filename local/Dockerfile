@@ -22,4 +22,4 @@ RUN mkdir /var/run/sshd
 EXPOSE 22
 RUN /usr/sbin/sshd
 
-CMD ["/usr/sbin/sshd", "-D"]
+CMD ["/lib/systemd/systemd", "-D"]
