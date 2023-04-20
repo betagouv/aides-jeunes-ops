@@ -1,18 +1,7 @@
-- name: "Reload {{ service_name }}"
+- name: "Reload or start {{ service_name }}"
   become: true
   become_method: sudo
   ansible.builtin.service:
     name: "{{ service_name }}"
-    state: restarted
-- name: "Start {{ service_name }} if stopped"
-  become: true
-  become_method: sudo
-  ansible.builtin.service:
-    name: "{{ service_name }}"
-    state: started
-- name: "Start {{ service_name }} on boot"
-  become: true
-  become_method: sudo
-  ansible.builtin.service:
-    name: "{{ service_name }}"
+    state: reloaded
     enabled: true

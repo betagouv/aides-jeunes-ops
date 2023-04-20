@@ -98,6 +98,8 @@ This will also add the public key currently used to connect to the server with A
 
 In order to run ansible on a local image you will need to have both Vagrant and Docker installed on your machine. You will also need to have a valid public/secret key pair in your local ssh folder (`~/.ssh/`) called `id_rsa.pub` and `id_rsa`.
 
-Navigate to the `local` folder and run the command `vagrant up --provider=docker` to create a docker container.
+Navigate to the `local` folder and run the command :
+- `vagrant up --provider=virtualbox` to create a VirtualBox VM
+- `vagrant up --provider=docker` to create a docker container (recommended if running on an arm64 processor)
 
 Once the image is successfully created, you should be able to run any of the above commands.
