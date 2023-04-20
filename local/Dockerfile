@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 debian:11.6
+FROM debian:11.6
 ENV container docker
 
 RUN apt-get update -y && apt-get dist-upgrade -y

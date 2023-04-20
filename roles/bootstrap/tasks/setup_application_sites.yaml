@@ -62,7 +62,4 @@
       include_tasks: openfisca_reload.yaml
       vars:
         - service_name: "{{ openfisca_service_name }}"
-    - name: Enable openfisca service
-      command:
-        cmd: "systemctl enable {{ openfisca_service_name }}"
 

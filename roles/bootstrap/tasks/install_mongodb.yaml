@@ -4,10 +4,20 @@
       apt_key:
         url: https://www.mongodb.org/static/pgp/server-6.0.asc
         state: present
-    - name: "add mongoDB 6.x ppa for apt repo"
+    - name: "use the correct package source depending on architecture"
+      shell:
+        cmd: arch
+      register: server_arch
+    - name: "add mongoDB 6.x ppa for apt repo - arm64"
+      ansible.builtin.apt_repository:
+        repo: deb https://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/6.0 multiverse
+        update_cache: true
+      when: "server_arch.stdout == 'aarch64'"
+    - name: "add mongoDB 6.x ppa for apt repo - amd64"
       ansible.builtin.apt_repository:
         repo: deb https://repo.mongodb.org/apt/debian bullseye/mongodb-org/6.0 main
         update_cache: true
+      when: "server_arch.stdout != 'aarch64'"
     - name: "install mongoDB"
       apt:
         update_cache: true
