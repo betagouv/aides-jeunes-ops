@@ -4,7 +4,7 @@ virtualmachines:
       ansible_host: localhost
       ansible_port: 2222
       ansible_ssh_user: root
-      ansible_ssh_private_key_file: ~/.ssh/github_auth
+      ansible_ssh_private_key_file: ~/.ssh/id_rsa
       ansible_host_ip: 51.38.232.135
       fullname: solstice.mes-aides.1jeune1solution.beta.gouv.fr
       dns_root: beta.gouv.fr
