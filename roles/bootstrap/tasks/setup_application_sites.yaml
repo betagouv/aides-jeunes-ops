@@ -2,7 +2,7 @@
     application_folder: "/home/{{ server_user_name }}/{{ item.name }}"
     repository_folder: "/home/{{ server_user_name }}/{{ item.name }}/repository"
     envvar_prefix: "NODE_ENV=production MONGODB_URL=mongodb://localhost/db_{{ item.name }}"
-    envvar: "NODE_ENV=production MES_AIDES_ROOT_URL=http{{ 's' if application.https else '' }}://{{ application.domain }}"
+    envvar: "NODE_ENV=production MES_AIDES_ROOT_URL=http{{'s' if item.https }}://{{ item.domain }}"
     venv_dir: "/home/{{ server_user_name }}/{{ item.name }}/venv"
     openfisca_service_name: "{{ item.name }}_openfisca"
 - name: Fetch repository and sets Cron jobs for {{ item.name }}
@@ -53,7 +53,7 @@
         name: "anonymize simulation and followup data collections for {{ item.name }}"
         minute: "0"
         hour: "11"
-        job: "(cd {repository_folder} && {envvar} npm run tools:cleaner)"
+        job: "(cd {{repository_folder}} && {{envvar}} npm run tools:cleaner)"
   when: true
 - name: Setup Openfisca
   block:
