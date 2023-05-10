@@ -52,7 +52,7 @@
       ansible.builtin.cron:
         name: "anonymize simulation and followup data collections for {{ item.name }}"
         minute: "0"
-        hour: "11"
+        hour: "5"
         job: "(cd {{repository_folder}} && {{envvar}} npm run tools:cleaner)"
   when: true
 - name: Setup Openfisca
