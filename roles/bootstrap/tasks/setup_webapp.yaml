@@ -30,6 +30,15 @@
         - NODE_ENV: production
         - MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
         - MES_AIDES_ROOT_URL: http{{ 's' if item.https }}://{{ item.domain }}
+    - name: Run npm build:front:sourcemap
+      ansible.builtin.command:
+        chdir: "{{ repository_folder }}"
+        cmd: npm run build:front:sourcemap
+      changed_when: true
+      environment:
+        - NODE_ENV: production
+        - MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
+        - MES_AIDES_ROOT_URL: http{{ 's' if item.https }}://{{ item.domain }}
 - name: Pm2 restart {{ item.name }}
   become_user: "{{ server_user_name }}"
   changed_when: true
