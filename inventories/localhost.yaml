@@ -12,7 +12,6 @@ virtualmachines:
       dns_root: beta.gouv.fr
       email: prenom.nom@beta.gouv.fr
       github_users:
-        - baptou12
         - guillett
         - Shamzic
       monitor:
