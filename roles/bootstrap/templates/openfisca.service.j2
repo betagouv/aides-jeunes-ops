@@ -7,6 +7,7 @@ Group={{ server_user_group }}
 Environment="OPENFISCA_WORKERS={{ item.openfisca_worker_number | default(3) }}" "OPENFISCA_PORT={{ item.openfisca_server_port }}"
 WorkingDirectory={{ repository_folder }}/
 ExecStart={{ venv_dir }}/bin/gunicorn openfisca.api --config openfisca/config.py
+Restart=on-failure
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
