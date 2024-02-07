@@ -1,19 +1,20 @@
-name: "Continuous Integration"
+name: "Continuous Deployment"
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
+  push:
+    branches:
+      - dev
+      - main
+concurrency: ci-${{ github.ref }}
 
 env:
-  ECLIPSE_SSH_HOST: 51.91.16.19
+  ECLIPSE_SSH_HOST: eclipse.mes-aides.incubateur.net
   ECLIPSE_SSH_USER: debian
-  EQUINOXE_SSH_HOST: 5.135.137.147
+  EQUINOXE_SSH_HOST: equinoxe.mes-aides.1jeune1solution.beta.gouv.fr
   EQUINOXE_SSH_USER: debian
 
-
 jobs:
-  install:
+  install_python_requirements:
     name: Install Python requirements
     runs-on: ubuntu-20.04
     steps:
@@ -29,10 +30,10 @@ jobs:
           key: ${{ runner.os }}-python-dependencies-${{ hashFiles('**/requirements.txt') }}
       - name: Install dependencies
         run: pip install -r requirements.txt
-  lint:
+  lint_ansible_files:
     name: Lint ansible files
     runs-on: ubuntu-20.04
-    needs: [install]
+    needs: [install_python_requirements]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -48,29 +49,13 @@ jobs:
         run: pip freeze
       - name: Run ansible lint
         run: ansible-lint --offline
-  deployment:
-    name: Continuous deployment
+
+  deploy_production:
+    name: Deploy production (Equinoxe)
     runs-on: ubuntu-20.04
-    needs: [install, lint]
+    needs: [install_python_requirements, lint_ansible_files]
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-      - name: Cache Python dependencies
-        uses: actions/cache@v3
-        id: python-dependencies
-        with:
-          path: ${{ env.pythonLocation }}
-          key: ${{ runner.os }}-python-dependencies-${{ hashFiles('**/requirements.txt') }}
-      - name: Eclipse Deployment
-        shell: bash
-        run: |
-          mkdir -p ~/.ssh/
-          echo "${{ secrets.ECLIPSE_PRIVATE_KEY }}" > ~/.ssh/eclipse
-          chmod 600 ~/.ssh/eclipse
-          ssh -o StrictHostKeyChecking=no ${{ env.ECLIPSE_SSH_USER }}@${{ env.ECLIPSE_SSH_HOST }} -i ~/.ssh/eclipse
       - name: Equinoxe Deployment
         shell: bash
         run: |
@@ -78,3 +63,17 @@ jobs:
           echo "${{ secrets.EQUINOXE_PRIVATE_KEY }}" > ~/.ssh/equinoxe
           chmod 600 ~/.ssh/equinoxe
           ssh -o StrictHostKeyChecking=no ${{ env.EQUINOXE_SSH_USER }}@${{ env.EQUINOXE_SSH_HOST }} -i ~/.ssh/equinoxe
+
+  deploy_preproduction:
+    name: Deploy preproduction (Eclipse)
+    runs-on: ubuntu-20.04
+    needs: [install_python_requirements, lint_ansible_files]
+    if: github.ref == 'refs/heads/dev'
+    steps:
+      - name: Eclipse Deployment
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.ECLIPSE_PRIVATE_KEY }}" > ~/.ssh/eclipse
+          chmod 600 ~/.ssh/eclipse
+          ssh -o StrictHostKeyChecking=no ${{ env.ECLIPSE_SSH_USER }}@${{ env.ECLIPSE_SSH_HOST }} -i ~/.ssh/eclipse
