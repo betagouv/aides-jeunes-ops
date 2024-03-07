@@ -10,13 +10,12 @@ apps:
 {% if item.https %}
       MES_AIDES_ROOT_URL: https://{{ item.domain }}
       OPENFISCA_PUBLIC_ROOT_URL: https://openfisca.{{ item.domain }}
-      OPENFISCA_TRACER_URL: https://openfisca.github.io/tracer
 {% else %}
       MES_AIDES_ROOT_URL: http://{{ item.domain }}
       OPENFISCA_PUBLIC_ROOT_URL: http://openfisca.{{ item.domain }}
-      OPENFISCA_TRACER_URL: http://127.0.0.1:3000
 {% endif %}
       MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
       NODE_ENV: production
       OPENFISCA_INTERNAL_ROOT_URL: http://127.0.0.1:{{ item.openfisca_server_port }}
+      OPENFISCA_TRACER_URL: https://openfisca.github.io/tracer
       PORT: {{ item.node_server_port }}
