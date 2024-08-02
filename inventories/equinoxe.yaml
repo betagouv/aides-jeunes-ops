@@ -12,7 +12,6 @@ virtualmachines:
       email: aides-jeunes@beta.gouv.fr
       github_users:
         - jenovateurs
-        - guillett
         - Shamzic
       monitor:
         port: 8887

@@ -30,7 +30,7 @@ virtualmachines:
       dns_root: leonides.org                                             # The root of domain name use by your server
       email: random-email@leonides.org                                   # The email used to register Certbot
       github_users:                                                      # The github users that will be able to connect to the server
-        - guillett
+        - github_username_example
       monitor:                                                           # If set, a monitoring service will be deployed on specified port
         port: 8887
       applications:                                                      # List all applications that will be deployed
