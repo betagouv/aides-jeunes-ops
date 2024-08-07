@@ -14,10 +14,22 @@ Vagrant.configure("2") do |config|
   config.vm.provider "docker" do |docker, override|
 		override.vm.box = nil
 		docker.build_dir = "."
+
+		platform = `uname -m`.strip
+		is_arm64 = platform == "arm64" || platform == "aarch64"
+
+        # Conditional arguments for ARM64 platform
+        if is_arm64
+          docker.build_args = "--platform=linux/arm64"
+          docker.create_args = ["--platform=linux/arm64"]
+        end
+
+		docker.build_args = "--platform=linux/arm64"
+		docker.name = "ctn_aides_jeunes"
 		override.ssh.insert_key = true
 		docker.has_ssh = true
-		docker.privileged = true 
-    docker.ports = ["8001:8001", "2001:2001", "8002:8002", "2002:2002", "8887:8887"]
+		docker.privileged = true
+        docker.ports = ["8001:8001", "2001:2001", "8002:8002", "2002:2002", "8887:8887"]
 	end
 
   # Faster startup
