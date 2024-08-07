@@ -1,5 +1,5 @@
 FROM debian:11.6
-ENV container docker
+ENV container=docker
 
 RUN apt-get update -y && apt-get dist-upgrade -y
 RUN apt-get install -y --no-install-recommends ssh sudo wget curl cron software-properties-common build-essential libffi-dev systemd openssh-client net-tools
