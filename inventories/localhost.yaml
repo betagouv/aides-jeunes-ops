@@ -12,7 +12,7 @@ virtualmachines:
       dns_root: beta.gouv.fr
       email: prenom.nom@beta.gouv.fr
       github_users:
-        - guillett
+        - jenovateurs
         - Shamzic
       monitor:
         port: 8887

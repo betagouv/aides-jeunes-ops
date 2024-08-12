@@ -30,7 +30,7 @@ virtualmachines:
       dns_root: leonides.org                                             # The root of domain name use by your server
       email: random-email@leonides.org                                   # The email used to register Certbot
       github_users:                                                      # The github users that will be able to connect to the server
-        - guillett
+        - github_username_example
       monitor:                                                           # If set, a monitoring service will be deployed on specified port
         port: 8887
       applications:                                                      # List all applications that will be deployed
@@ -80,6 +80,13 @@ ansible-playbook -i ./inventories/vps.yaml synchronize.yaml
 
 A copy of this repository will be created in the folder `/opt/mes-aides` of the server. This repository will be automatically updated and new modifications applied every time an ssh connection is made with the private key associated with the `update_key` defined in the inventory.
 
+Note:
+Private and public keys should be generated manually:
+- Private should be keys added to Github secrets variable (used [here](https://github.com/betagouv/aides-jeunes-ops/blob/9f5bd32001b1b889f580e7e14213397b7af2227b/.github/workflows/pipeline.yaml#L71) for instance)
+- Public keys added to `ops.update_key` variable in the inventory
+
+Warning: Launching the `synchronize.yaml` playbook alone will remove continuous deploiement of server stack. You will need to run the `bootstrap.yaml` playbook again to re-enable it.
+
 ### Bootstrap server stack
 
 Run the command `ansible-playbook -i ./inventories/vps.yaml bootstrap.yaml` in order to bootstrap the server basic configuration.
@@ -87,6 +94,17 @@ Run the command `ansible-playbook -i ./inventories/vps.yaml bootstrap.yaml` in o
 Once done, every applications should be up and running on the server.
 
 Note that you only need to run this command once, but you can re-run it if you modify either Nginx, Python, Mongo configuration or if the bootstrap process failed at some point. All unaltered steps that ran successfully will be automatically skipped by Ansible.
+
+#### First deployment
+
+In order to setup continuous deployment, you will need to:
+- Run manually the `synchronize.yaml` playbook
+- Run manually the `bootstrap.yaml` playbook
+- Connect to the server using one of the private keys associated to your Github account
+- switch user to `main`
+- run `cd ~/` and cd the application folder you want to deploy
+- get the private key (see `ansible_ssh_private_key_file` in inventory)
+- set it up in your Github repository as a secret (see [here](https://github.com/betagouv/aides-jeunes/blob/400ab5f90219141b438388d58cd4f27f8fb0ebd6/.github/workflows/cd.yml#L48))
 
 ### Backup mongodb collections
 
