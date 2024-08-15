@@ -48,5 +48,3 @@
         mode: "0600"
     - name: Add cron for application
       ansible.builtin.include_tasks: setup_cron.yaml
-      tags:
-          - setup_cron
