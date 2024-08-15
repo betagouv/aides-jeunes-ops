@@ -1,0 +1,5 @@
+---
+- name: Install @sentry/cli using npm
+  ansible.builtin.npm:
+    name: '@sentry/cli'
+    global: yes
