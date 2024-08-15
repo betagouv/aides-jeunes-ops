@@ -3,7 +3,7 @@
   ansible.builtin.set_fact:
     envvar_prefix: NODE_ENV=production MONGODB_URL=mongodb://127.0.0.1/db_{{ item.name }}
     env_file_path: "{{ repository_folder }}/.env"
-    wrapper_script_path: "{{ playbook_dir }}/script/sentry_wrapper_cron.sh"
+    wrapper_script_path: "/opt/mes-aides/scripts/sentry_wrapper_cron.sh"
 - name: Add a cron job for stats generation
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
