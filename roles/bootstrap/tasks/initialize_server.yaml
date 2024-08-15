@@ -15,6 +15,10 @@
   ansible.builtin.apt:
     name: [rsync, python3-pip, build-essential, git, man, ntp]
     state: present
+- name: Install sentry-cli
+  ansible.builtin.pip:
+    name: sentry-sdk
+    state: present
 - name: Add gnupg in order to add PPA with apt # required for node, python, mongo
   ansible.builtin.apt:
     name: [gnupg]
