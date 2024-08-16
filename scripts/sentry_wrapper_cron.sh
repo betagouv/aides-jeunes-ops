@@ -19,15 +19,16 @@ if [ -z "$SENTRY_CRON_DSN" ]; then
 fi
 
 echo "SENTRY_CRON_DSN is set to: $SENTRY_CRON_DSN"
-export SENTRY_DSN=$SENTRY_CRON_DSN
 
 # The wrapped command is executed and the result status is stored
-"$@" 
+COMMAND="$@"
+OUTPUT=$(eval "$COMMAND" 2>&1)
 STATUS=$?
 
 if [ $STATUS -ne 0 ]; then
-    echo "Cron job failed: $@"
-    sentry-cli send-event -m "Cron job failed: $@"
+    echo "Cron job failed: $COMMAND"
+    echo "Error output: $OUTPUT"
+    SENTRY_DSN="$SENTRY_CRON_DSN" sentry-cli send-event -m "Cron job failed: $COMMAND | Error: $OUTPUT"
 fi
 
 exit $STATUS
