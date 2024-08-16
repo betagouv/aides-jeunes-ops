@@ -2,4 +2,4 @@
 - name: Install @sentry/cli using npm
   community.general.npm:
     name: '@sentry/cli'
-    global: yes
+    global: true
