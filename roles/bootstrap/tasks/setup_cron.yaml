@@ -10,7 +10,7 @@
     name: generate stats for {{ item.name }}
     minute: "23"
     hour: "2"
-    job: ({{ wrapper_script_path }} {{ env_file_path }} {{ envvar_prefix }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/stats)
+    job: ({{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/stats)
 - name: Add a cron job to send initial survey emails
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
@@ -19,7 +19,7 @@
     hour: "4"
     job: >-
       (cd {{ repository_folder }} &&
-      {{ wrapper_script_path }} {{ env_file_path }} {{ envvar_prefix }} /usr/bin/node
+      {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node
       ./dist-server/tools/email-sending-tool.js send initial-survey
       --multiple 1000 >> /var/log/{{ server_user_name }}/{{ item.name }}_emails.log 2>&1)
 - name: Add a cron job to send initial survey by sms
@@ -30,7 +30,7 @@
     hour: "17"
     job: >-
       (cd {{ repository_folder }} &&
-      {{ wrapper_script_path }} {{ env_file_path }} {{ envvar_prefix }} /usr/bin/node
+      {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node
       ./dist-server/tools/sms-sending-tool.js send initial-survey
       --multiple 100 >> /var/log/{{ server_user_name }}/{{ item.name }}_sms.log 2>&1)
 - name: Add a cron job to anonymize Simulation and Followup data collections
@@ -39,7 +39,7 @@
     name: anonymize simulation and followup data collections for {{ item.name }}
     minute: "0"
     hour: "5"
-    job: (cd {{ repository_folder }} && {{ wrapper_script_path }} {{ env_file_path }} {{ envvar_prefix }} npm run tools:cleaner)
+    job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} npm run tools:cleaner)
 - name: Create cron job to execute generate_mongo_stats.sh monthly
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
@@ -47,4 +47,4 @@
     minute: "0"
     hour: "0"
     day: "1"
-    job: (cd {{ repository_folder }} && {{ wrapper_script_path }} {{ env_file_path }} {{ envvar_prefix }} npm run tools:generate-mongo-stats)
+    job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} npm run tools:generate-mongo-stats)
