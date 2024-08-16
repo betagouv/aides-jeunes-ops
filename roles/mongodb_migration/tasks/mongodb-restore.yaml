@@ -1,7 +1,7 @@
 ---
 - name: Restore MongoDB collections to Server
   ansible.builtin.copy:
-    src: ./.tmp/{{ application.name }}_{{ item.key }}.tar.gz
+    src: ./.tmp/{{ application.name }}_{{ item.key }}.gz
     dest: /tmp/mongodump/
     mode: "0644"
   with_dict: "{{ application.mongodb_collections_migration }}"
@@ -9,12 +9,12 @@
   ansible.builtin.shell: |
     mongorestore \
       --gzip \
-      --archive=/tmp/mongodump/{{ application.name }}_{{ item.key }}.tar.gz
+      --archive=/tmp/mongodump/{{ application.name }}_{{ item.key }}.gz
   register: restore_result
   changed_when: restore_result.rc == 0
   with_dict: "{{ application.mongodb_collections_migration }}"
 - name: Remove MongoDB dumps and archive from remote server
   ansible.builtin.file:
-    path: /tmp/mongodump/{{ application.name }}_{{ item.key }}.tar.gz
+    path: /tmp/mongodump/{{ application.name }}_{{ item.key }}.gz
     state: absent
   with_dict: "{{ application.mongodb_collections_migration }}"

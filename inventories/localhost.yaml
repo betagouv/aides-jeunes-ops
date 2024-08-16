@@ -28,8 +28,8 @@ virtualmachines:
           openfisca_server_port: 2001
           openfisca_worker_number: 4
           mongodb_collections_migration:
-            simulations: '{"created_at": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
-            followups: '{"created_at": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
+            simulations: '{"createdAt": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
+            followups: '{"createdAt": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
         - name: aides_jeunes_preprod
           repository: https://github.com/betagouv/aides-jeunes.git
           branch: dev
