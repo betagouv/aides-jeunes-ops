@@ -113,8 +113,8 @@ It is possible to dump mongodb collections from a server and restore them on ano
 In order do dump data, you will need to had specific configuration lines in your inventory application to specify which mongodb collection to target and with which query :
 ```yaml
 mongodb_collections_migration:
-  simulations: '{"created_at": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
-  followups: '{"created_at": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
+  simulations: '{"createdAt": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
+  followups: '{"createdAt": {"$gte": { "$date": "2023-01-01T00:00:00.000Z" }}}'
 ```
 Then run the following command to download the selected collections locally in a `./.tmp` folder :
 ```bash
