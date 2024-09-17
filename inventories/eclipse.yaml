@@ -41,5 +41,5 @@ virtualmachines:
           openfisca_worker_number: 2
       ops:
         repository: https://github.com/betagouv/aides-jeunes-ops.git
-        branch: main
+        branch: dev
         update_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILf+3BWu3FJDmuouJK1SuAaQrPLmJrBR1xMf5fGCJtGz eclipse@eclipse
