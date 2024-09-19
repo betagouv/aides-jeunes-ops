@@ -2,7 +2,13 @@
 - name: Synchronize Ops repository with server
   become: true
   hosts: all
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
   tasks:
+    - name: Ensure python3-apt is installed (required for apt module)
+      ansible.builtin.apt:
+        name: python3-apt
+        state: present
     - name: Install continuous deployment tools
       ansible.builtin.apt:
         name: [git, python3-pip]
@@ -18,7 +24,8 @@
         update: true
         clone: true
         single_branch: true
-        version: "{{ ops.branch | default('main') }}"
+        force: true
+        version: "main"
       when: ops.repository is defined
     - name: Set deployment variables
       ansible.builtin.set_fact:
