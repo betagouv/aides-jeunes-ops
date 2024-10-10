@@ -8,7 +8,7 @@
         name: [git, python3-pip]
         state: present
     - name: Install ansible on host
-      ansible.builtin.pip:
+      ansible.builtin.apt:
         name: ansible
     - name: Clone application repository
       ansible.builtin.git:
