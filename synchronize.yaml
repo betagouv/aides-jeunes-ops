@@ -16,8 +16,9 @@
         cmd: python3 -m venv /opt/venv
         creates: /opt/venv
     - name: Install ansible in the virtual environment
-      ansible.builtin.command:
-        cmd: /opt/venv/bin/pip install ansible
+      ansible.builtin.pip:
+        name: ansible
+        virtualenv: /opt/venv
     - name: Clone application repository
       ansible.builtin.git:
         repo: "{{ ops.repository }}"
