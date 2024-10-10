@@ -7,7 +7,7 @@
 - name: Install pm2 package
   community.general.npm:
     name: pm2
-    version: "5.4.2"
+    version: "5.2"
     global: true
     state: present
     production: true
