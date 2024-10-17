@@ -7,9 +7,18 @@
       ansible.builtin.apt:
         name: [git, python3-pip]
         state: present
-    - name: Install ansible on host
+    - name: Install Python venv
+      ansible.builtin.apt:
+        name: python3-venv
+        state: present
+    - name: Create a virtual environment
+      ansible.builtin.command:
+        cmd: python3 -m venv /opt/venv
+        creates: /opt/venv
+    - name: Install ansible in the virtual environment
       ansible.builtin.pip:
         name: ansible
+        virtualenv: /opt/venv
     - name: Clone application repository
       ansible.builtin.git:
         repo: "{{ ops.repository }}"
