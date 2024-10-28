@@ -10,7 +10,6 @@
     - name: Install ansible on host
       ansible.builtin.pip:
         name: ansible
-        extra_args: "--break-system-packages"
     - name: Clone application repository
       ansible.builtin.git:
         repo: "{{ ops.repository }}"
