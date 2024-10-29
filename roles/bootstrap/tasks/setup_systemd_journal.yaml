@@ -1,0 +1,15 @@
+---
+- name: Setup systemd journal rotation
+  ansible.builtin.blockinfile:
+    path: /etc/systemd/journald.conf
+    block: |
+      [Journal]
+      SystemMaxUse=2G
+      SystemMaxFileSize=100M
+      MaxRetentionSec=90d
+      Compress=yes
+  notify: restart systemd-journald
+
+- name: Force immediate cleanup of old journals
+  ansible.builtin.command: journalctl --vacuum-time=90d
+  changed_when: true
