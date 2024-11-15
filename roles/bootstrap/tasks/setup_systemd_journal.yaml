@@ -8,7 +8,7 @@
       SystemMaxFileSize=100M
       MaxRetentionSec=90d
       Compress=yes
-  notify: restart systemd-journald
+  notify: Restart systemd-journald
 
 - name: Force immediate cleanup of old journals
   ansible.builtin.command: journalctl --vacuum-time=90d
