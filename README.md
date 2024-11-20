@@ -4,7 +4,7 @@ Set up the [Mes Aides](https://mes-aides.1jeune1solution.beta.gouv.fr/) stack.
 
 ## Before starting
 
-The ansible scripts in this repository have been tested only Debian 11 x86_64 server. However, older or newer versions of Debian may be compatible.
+The ansible scripts in this repository have been tested only Debian 12 x86_64 server. However, older or newer versions of Debian may be compatible.
 
 ## Deployment
 
