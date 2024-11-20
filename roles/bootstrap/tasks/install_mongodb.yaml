@@ -1,18 +1,18 @@
 ---
-- name: Install mongoDB 6.x
+- name: Install mongoDB 7.x
   block:
-    - name: Add mongoDB 6.x apt key
+    - name: Add mongoDB 7.x apt key
       ansible.builtin.apt_key:
-        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        url: https://www.mongodb.org/static/pgp/server-7.0.asc
         state: present
-    - name: Add mongoDB 6.x ppa for apt repo - arm64
+    - name: Add mongoDB 7.x ppa for apt repo - arm64
       ansible.builtin.apt_repository:
-        repo: deb https://repo.mongodb.org/apt/ubuntu bionic/mongodb-org/6.0 multiverse
+        repo: deb https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse
         update_cache: true
       when: ansible_facts.machine == 'aarch64'
-    - name: Add mongoDB 6.x ppa for apt repo - amd64
+    - name: Add mongoDB 7.x ppa for apt repo - amd64
       ansible.builtin.apt_repository:
-        repo: deb https://repo.mongodb.org/apt/debian bullseye/mongodb-org/6.0 main
+        repo: deb https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main
         update_cache: true
       when: ansible_facts.machine != 'aarch64'
     - name: Install mongoDB
