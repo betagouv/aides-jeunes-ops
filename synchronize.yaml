@@ -17,7 +17,7 @@
         update: true
         clone: true
         single_branch: true
-        version: "{{ ops.branch | default('main') }}"
+        version: "{{ ops.branch }}"
       when: ops.repository is defined
     - name: Set deployment variables
       ansible.builtin.set_fact:
