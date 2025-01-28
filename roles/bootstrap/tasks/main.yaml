@@ -11,6 +11,10 @@
 - name: Install nodeJS 18.x
   ansible.builtin.include_tasks: install_node.yaml
 
+## setup sentry-cli
+- name: Install sentry-cli
+  ansible.builtin.include_tasks: install_sentry_cli.yaml
+
 ## Setup pm2
 - name: Install and setup pm2
   ansible.builtin.include_tasks: install_pm2.yaml

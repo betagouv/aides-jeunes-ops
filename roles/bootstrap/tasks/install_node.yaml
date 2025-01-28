@@ -1,14 +1,25 @@
 ---
-- name: Add nodejs apt key
-  ansible.builtin.apt_key:
-    url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
-    state: present
-- name: Add nodejs 18.x ppa for apt repo
-  ansible.builtin.apt_repository:
-    repo: deb https://deb.nodesource.com/node_18.x bullseye main
-    update_cache: true
-- name: Install nodejs
+
+- name: Download node.js installation script
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/setup_{{ node_version }}.x
+    dest: /tmp/nodesource_setup.sh
+    mode: '0755'
+
+- name: Run the nodesource setup script
+  become: true
+  ansible.builtin.command: sh /tmp/nodesource_setup.sh
+  args:
+    creates: /usr/bin/node
+
+- name: Update and install nodejs
+  become: true
   ansible.builtin.apt:
-    update_cache: true
     name: nodejs
     state: present
+    update_cache: true
+
+- name: Clean up NodeSource setup script
+  ansible.builtin.file:
+    path: /tmp/nodesource_setup.sh
+    state: absent

@@ -11,14 +11,15 @@
       ansible.builtin.pip:
         name: pip
         virtualenv: "{{ venv_dir }}"
-        virtualenv_command: python3.11 -m venv
+        virtualenv_command: python3 -m venv
         extra_args: --upgrade
     - name: Install Openfisca requirements
-      become_user: "{{ server_user_name }}"
+      become: true
+      become_method: ansible.builtin.sudo
       ansible.builtin.pip:
         requirements: "{{ repository_folder }}/openfisca/requirements.txt"
         virtualenv: "{{ venv_dir }}"
-        virtualenv_command: python3.11 -m venv
+        virtualenv_command: python3 -m venv
         extra_args: --upgrade
     - name: Setup openfisca service
       ansible.builtin.template:

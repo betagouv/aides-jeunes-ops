@@ -1,4 +1,4 @@
-FROM debian:11.6
+FROM debian:12
 ENV container=docker
 
 RUN apt-get update -y && apt-get dist-upgrade -y
