@@ -115,9 +115,12 @@ server {
   {{ well_known_section(webroot_path, challenge_proxy) }}
 
   # Block URLs with encoded characters or multiple slashes
+  {% if 'openfisca' in service_domain %}
   if ($request_uri ~* "(%5C|//)") {
       return 400; # Bad Request
   }
+  {% endif %}
+
 
   gzip                on;
   gzip_proxied        any;
