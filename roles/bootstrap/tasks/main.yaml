@@ -31,6 +31,10 @@
 - name: Install and configure certbot
   ansible.builtin.include_tasks: install_certbot.yaml
 
+## Setup systemd
+- name: Setup systemd journal rotation
+  ansible.builtin.include_tasks: setup_systemd_journal.yaml
+
 ## Setup Monitoring service
 - name: Configure monitoring service
   ansible.builtin.include_tasks: setup_monitor.yaml
