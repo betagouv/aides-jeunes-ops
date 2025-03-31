@@ -34,7 +34,7 @@
         comment: "# Application deployment key for {{ item.name }}"
         key_options: command="{{ deploy_command }}",{{ deploy_access_rules }}"
     - name: Clone application repository
-      bceome: false
+      become: false
       become_user: "{{ server_user_name }}"
       ansible.builtin.git:
         repo: "{{ item.repository }}"
