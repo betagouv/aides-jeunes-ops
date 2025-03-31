@@ -10,7 +10,7 @@
         certbot_www_option: ""
     - name: Generate certificate if missing
       when: >
-        (not certificate.stat.exists) and 
+        (not certificate.stat.exists) and
         (https | default(false)) and
         (('incubateur.net' in service_domain and inventory_hostname == 'eclipse') or
          ('beta.gouv.fr' in service_domain and inventory_hostname == 'equinoxe'))
