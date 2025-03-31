@@ -4,6 +4,7 @@
     application_folder: /home/{{ server_user_name }}/{{ item.name }}
     repository_folder: /home/{{ server_user_name }}/{{ item.name }}/repository
 - name: Fetch application latest version
+  become: false
   become_user: "{{ server_user_name }}"
   ansible.builtin.git:
     repo: "{{ item.repository }}"
@@ -12,6 +13,7 @@
     clone: false
     version: "{{ item.branch }}"
 - name: Install npm packages and restart server
+  become: false
   become_user: "{{ server_user_name }}"
   block:
     - name: Run npm ci
@@ -29,10 +31,12 @@
         - MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
         - MES_AIDES_ROOT_URL: http{{ 's' if item.https }}://{{ item.domain }}
 - name: Pm2 restart {{ item.name }}
+  become: false
   become_user: "{{ server_user_name }}"
   changed_when: true
   ansible.builtin.command: pm2 startOrReload {{ application_folder }}/pm2_config.yaml --update-env
 - name: Pm2 save configuration for {{ item.name }}
+  become: false
   become_user: "{{ server_user_name }}"
   changed_when: true
   ansible.builtin.command: pm2 save

@@ -17,6 +17,7 @@
   ansible.builtin.command: pm2 startup systemd -u {{ server_user_name }} --hp /home/{{ server_user_name }}
 - name: Setup logrotate for pm2
   changed_when: false
+  become: false
   become_user: "{{ server_user_name }}"
   ansible.builtin.command:
     cmd: "{{ item }}"
