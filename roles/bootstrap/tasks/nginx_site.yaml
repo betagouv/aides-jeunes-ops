@@ -5,8 +5,19 @@
       ansible.builtin.stat:
         path: /etc/letsencrypt/live/{{ service_domain }}/fullchain.pem
       register: certificate
+    - name: Set default certbot options
+      ansible.builtin.set_fact:
+        certbot_www_option: ""
+    - name: Debug - Print service domain and ignored domains
+      ansible.builtin.debug:
+        msg: |
+          Current service domain: {{ service_domain }}
+          Ignored SSL domains: {{ ignored_ssl_domains | default([]) }}
     - name: Generate certificate if missing
-      when: (not certificate.stat.exists) and (https | default(false))
+      when: >
+        (not certificate.stat.exists) and
+        (https | default(false)) and
+        (service_domain not in (ignored_ssl_domains | default([])))
       block:
         - name: Set SSL state
           ansible.builtin.set_fact:
@@ -24,6 +35,8 @@
         - name: Issue or renew an SSL certificate with Let's Encrypt
           ansible.builtin.command: >
             certbot --nginx
+            --non-interactive
+            --agree-tos
             -d {{ service_domain }}
             {{ certbot_www_option }}
           register: lets_encrypt_success
