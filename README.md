@@ -12,7 +12,7 @@ The ansible scripts in this repository have been tested only Debian 12 x86_64 se
 
 You will need at most the following ressources:
 - an SSH connection as a priviledged user to the remote server
-- Ansible >2.14.5 with Python >3.9 installed on your local machine. See [the documentation](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html#installing-ansible-on-specific-operating-systems) for your operating system.
+- Ansible >=11.4.0 with Python >3.9 installed on your local machine. See [the documentation](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html#installing-ansible-on-specific-operating-systems) for your operating system.
 
 Then, duplicate the file `vps.yaml` in the `inventories` folder and modifiy it to match your needs.
 
