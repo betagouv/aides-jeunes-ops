@@ -11,11 +11,6 @@
 
 {%- endmacro %}
 
-{% if 'preprod' in service_domain %}
-    # Add noindex for preprod environments
-    add_header X-Robots-Tag "noindex, nofollow" always;
-{% endif %}
-
 {% macro proxy_section(pass) -%}
     # Enable Keepalive Connections
     # https://www.nginx.com/blog/tuning-nginx/#keepalive
