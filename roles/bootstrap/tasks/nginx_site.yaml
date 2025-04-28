@@ -8,11 +8,6 @@
     - name: Set default certbot options
       ansible.builtin.set_fact:
         certbot_www_option: ""
-    - name: Debug - Print service domain and ignored domains
-      ansible.builtin.debug:
-        msg: |
-          Current service domain: {{ service_domain }}
-          Ignored SSL domains: {{ ignored_ssl_domains | default([]) }}
     - name: Set SSL state for ignored domains
       ansible.builtin.set_fact:
         ssl_exists: false
