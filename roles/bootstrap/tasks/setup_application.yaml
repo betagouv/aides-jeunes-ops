@@ -17,7 +17,7 @@
         group: "{{ server_user_group }}"
         mode: "755"
     - name: Generate SSH keypair
-      become: false
+      become: true
       become_user: "{{ server_user_name }}"
       community.crypto.openssh_keypair:
         path: "{{ application_folder }}/id_rsa"
