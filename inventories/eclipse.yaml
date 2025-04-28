@@ -43,3 +43,8 @@ virtualmachines:
         repository: https://github.com/betagouv/aides-jeunes-ops.git
         branch: dev
         update_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILf+3BWu3FJDmuouJK1SuAaQrPLmJrBR1xMf5fGCJtGz eclipse@eclipse
+      ignored_ssl_domains:
+        - preprod.mes-aides.incubateur.net
+        - openfisca.preprod.mes-aides.incubateur.net
+        - openfisca.mes-aides.1jeune1solution.beta.gouv.fr
+        - mes-aides.1jeune1solution.beta.gouv.fr
