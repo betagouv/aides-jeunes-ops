@@ -13,7 +13,7 @@
     clone: false
     version: "{{ item.branch }}"
 - name: Install npm packages and restart server
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   block:
     - name: Run npm ci
