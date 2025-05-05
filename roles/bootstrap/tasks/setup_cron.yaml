@@ -5,7 +5,7 @@
     env_file_path: "{{ repository_folder }}/.env"
     wrapper_script_path: "/opt/mes-aides/scripts/sentry_wrapper_cron.sh"
 - name: Add a cron job for stats generation
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
     name: generate stats for {{ item.name }}
@@ -13,7 +13,7 @@
     hour: "2"
     job: ({{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/stats)
 - name: Add a cron job to send initial survey emails
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
     name: send initial survey emails for {{ item.name }}
@@ -25,7 +25,7 @@
       ./dist-server/tools/email-sending-tool.js send initial-survey
       --multiple 1000 >> /var/log/{{ server_user_name }}/{{ item.name }}_emails.log 2>&1)
 - name: Add a cron job to send initial survey by sms
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
     name: send initial survey sms for {{ item.name }}
@@ -37,7 +37,7 @@
       ./dist-server/tools/sms-sending-tool.js send initial-survey
       --multiple 100 >> /var/log/{{ server_user_name }}/{{ item.name }}_sms.log 2>&1)
 - name: Add a cron job to anonymize Simulation and Followup data collections
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
     name: anonymize simulation and followup data collections for {{ item.name }}
@@ -45,7 +45,7 @@
     hour: "5"
     job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} npm run tools:cleaner)
 - name: Create cron job to execute generate_mongo_stats.sh monthly
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
     name: Execute generate_mongo_stats.sh monthly {{ item.name }}
