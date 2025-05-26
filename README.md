@@ -81,7 +81,7 @@ ansible-playbook -i ./inventories/vps.yaml synchronize.yaml
 A copy of this repository will be created in the folder `/opt/mes-aides` of the server. This repository will be automatically updated and new modifications applied every time an ssh connection is made with the private key associated with the `update_key` defined in the inventory.
 
 Note:
-Private and public keys should be generated manually:
+Private and public keys should be generated manually (`ssh-keygen -t ed25519 -C wiru@wiru -f key`):
 - Private should be keys added to Github secrets variable (used [here](https://github.com/betagouv/aides-jeunes-ops/blob/9f5bd32001b1b889f580e7e14213397b7af2227b/.github/workflows/pipeline.yaml#L71) for instance)
 - Public keys added to `ops.update_key` variable in the inventory
 
