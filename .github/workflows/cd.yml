@@ -12,6 +12,7 @@ env:
   ECLIPSE_SSH_USER: debian
   EQUINOXE_SSH_HOST: equinoxe.mes-aides.1jeune1solution.beta.gouv.fr
   EQUINOXE_SSH_USER: debian
+  PYTHON_VERSION: 3.11.4
 
 jobs:
   install_python_requirements:

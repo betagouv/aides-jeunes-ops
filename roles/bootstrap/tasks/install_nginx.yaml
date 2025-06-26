@@ -3,11 +3,6 @@
   ansible.builtin.apt:
     name: [nginx]
     state: present
-- name: Add www-data user to user group {{ server_user_group }}
-  ansible.builtin.user:
-    name: www-data
-    group: "{{ server_user_group }}"
-    append: true
 - name: Create www directory
   ansible.builtin.file:
     path: /var/www/{{ item["domain"] }}
