@@ -1,12 +1,12 @@
 ---
-- name: Install python 3.11.4
+- name: Install python {{ python_version }}
   block:
-    - name: Test if Python 3.11 is already installed
-      ansible.builtin.command: which python3.11
-      changed_when: "'python3.11' not in python_installed.stdout"
+    - name: Test if Python {{ python_version }} is already installed
+      ansible.builtin.command: which python{{ python_control_version }}
+      changed_when: "'python{{ python_control_version }}' not in python_installed.stdout"
       register: python_installed
       failed_when: python_installed.rc not in [0,1]
-    - name: Manually install Python 3.11
+    - name: Manually install Python {{ python_version }}
       when: python_installed.stdout | length == 0
       block:
         - name: Add packages required to install python
@@ -26,7 +26,7 @@
               - zlib1g-dev
         - name: Download and unarchive
           ansible.builtin.unarchive:
-            src: https://www.python.org/ftp/python/3.11.4/Python-3.11.4.tgz
+            src: https://www.python.org/ftp/python/{{ python_version }}/Python-{{ python_version }}.tgz
             dest: /opt
             remote_src: true
         - name: Build
@@ -34,16 +34,16 @@
           become_method: ansible.builtin.sudo
           changed_when: false
           ansible.builtin.command:
-            chdir: /opt/Python-3.11.4/
+            chdir: /opt/Python-{{ python_version }}/
             cmd: "{{ item }}"
           loop:
             - ./configure --enable-optimizations
             - make altinstall
         - name: Post-build clean-up
           ansible.builtin.file:
-            path: /opt/Python-3.11.4/
+            path: /opt/Python-{{ python_version }}/
             state: absent
-    - name: Install python 3.11 packages requirements
+    - name: Install python {{ python_version }} packages requirements
       ansible.builtin.apt:
         update_cache: true
         name:

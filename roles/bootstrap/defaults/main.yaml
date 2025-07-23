@@ -6,3 +6,5 @@ webroot_path: /var/www
 is_default: false
 challenge_proxy: false
 node_version: "24"
+python_version: "3.11.4"
+python_control_version: "3.11"
