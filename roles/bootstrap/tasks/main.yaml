@@ -8,7 +8,7 @@
   ansible.builtin.include_tasks: install_nginx.yaml
 
 ## Setup node
-- name: Install nodeJS 24.x
+- name: Install nodeJS {{ node_version }}
   ansible.builtin.include_tasks: install_node.yaml
 
 ## setup sentry-cli
@@ -20,7 +20,7 @@
   ansible.builtin.include_tasks: install_pm2.yaml
 
 ## Setup Python
-- name: Install python 3.11
+- name: Install python {{ python_version }}
   ansible.builtin.include_tasks: install_python.yaml
 
 ## Setup Mongo

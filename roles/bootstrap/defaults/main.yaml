@@ -6,3 +6,7 @@ webroot_path: /var/www
 is_default: false
 challenge_proxy: false
 node_version: "24"
+# Penser à modifier le fichier install_python.yaml la ligne 6
+# changed_when: "'python3.11' not in python_installed.stdout"
+python_version: "3.11.4"
+python_control_version: "3.11"
