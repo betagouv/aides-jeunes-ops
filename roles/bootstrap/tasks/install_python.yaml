@@ -1,7 +1,7 @@
 ---
 - name: Install python {{ python_version }}
   block:
-    - name: Test if Python {{ python_version }} is already installed
+    - name: Test if Python is already installed with version {{ python_control_version }}
       ansible.builtin.command: which python{{ python_control_version }}
       changed_when: "'python{{ python_control_version }}' not in python_installed.stdout"
       register: python_installed
