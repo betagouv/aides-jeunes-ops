@@ -12,6 +12,7 @@ env:
   ECLIPSE_SSH_USER: debian
   EQUINOXE_SSH_HOST: equinoxe.mes-aides.1jeune1solution.beta.gouv.fr
   EQUINOXE_SSH_USER: debian
+  PYTHON_VERSION: 3.11.4
 
 jobs:
   install_python_requirements:
@@ -23,7 +24,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.4'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
@@ -45,7 +46,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.4'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
       - name: Cache Python dependencies
         uses: actions/cache@v4
