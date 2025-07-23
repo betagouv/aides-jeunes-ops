@@ -43,7 +43,7 @@
           ansible.builtin.file:
             path: /opt/Python-{{ python_version }}/
             state: absent
-    - name: Install python {{ python_version }} packages requirements
+    - name: Install python packages requirements with version {{ python_version }}
       ansible.builtin.apt:
         update_cache: true
         name:
