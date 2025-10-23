@@ -121,7 +121,7 @@ server {
 
   {% if 'openfisca' in service_domain %}
   # Block URLs with encoded characters or multiple slashes
-  if ($request_uri ~* "(%5C|//)") {
+  if ($request_uri ~* "(%0[0-9A-Fa-f]|%5C|//)") {
       return 400; # Bad Request
   }
   {% endif %}
