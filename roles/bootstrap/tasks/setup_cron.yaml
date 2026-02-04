@@ -11,7 +11,7 @@
     name: generate stats for {{ item.name }}
     minute: "23"
     hour: "2"
-    job: ({{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node {{ repository_folder }}/dist-server/backend/lib/stats)
+    job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node ./dist-server/backend/lib/stats)
 - name: Add a cron job to send initial survey emails
   become: true
   become_user: "{{ server_user_name }}"
