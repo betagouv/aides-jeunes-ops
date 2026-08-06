@@ -25,7 +25,10 @@ virtualmachines:
           node_server_port: 8001
           node_instance_number: 4
           openfisca_server_port: 2001
-          openfisca_worker_number: 4
+          # Workers gunicorn sync : c'est la concurrence maximale d'OpenFisca
+          # pour tout le cluster. Dimensionner sur les vCPU de l'hôte en
+          # gardant de la marge pour node, mongo, nginx et la preprod.
+          openfisca_worker_number: 8
           mongodb_collections_migration:
             simulations: ""
             followups: ""

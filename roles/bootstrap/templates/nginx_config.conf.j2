@@ -23,6 +23,10 @@
     proxy_set_header Connection        "";
     proxy_set_header Host              $host;
     proxy_set_header X-Forwarded-Proto $scheme;
+    # Sans ces en-têtes, un X-Forwarded-For fourni par le client traverse le
+    # proxy tel quel et devient le `req.ip` d'Express (`trust proxy` = 1).
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Real-IP         $remote_addr;
     proxy_http_version                 1.1;
 
     proxy_pass        {{ pass }};
@@ -146,6 +150,15 @@ server {
   # Do not put any sensitive file there
   location / {
     try_files /dist$uri /dist$uri/index.html /app$uri @default;
+  }
+
+  # Routes de simulation : chacune peut déclencher un calcul OpenFisca, dont
+  # la concurrence est bornée par le nombre de workers gunicorn.
+  location /api/simulation {
+    limit_conn simulation_concurrency {{ simulation_max_concurrency | default(40) }};
+    limit_req  zone=simulation_per_ip burst=60 nodelay;
+
+    {{ proxy_section('http://' + upstream_name ) }}
   }
 
   location @default {
