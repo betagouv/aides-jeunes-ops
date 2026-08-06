@@ -33,6 +33,14 @@
     proxy_redirect    off;
 {%- endmacro %}
 
+{# Plafond de concurrence dimensionné sur le pool gunicorn, plus un garde-fou
+   par IP volontairement large : les mobiles partagent les IP de sortie CGNAT
+   des opérateurs, une limite serrée pénaliserait des utilisateurs légitimes. #}
+{% macro compute_limits_section() -%}
+    limit_conn simulation_concurrency {{ simulation_max_concurrency | default(24) }};
+    limit_req  zone=simulation_per_ip burst=60 nodelay;
+{%- endmacro %}
+
 {% macro well_known_section(webroot_path, proxy) -%}
   location /.well-known {
 
@@ -152,11 +160,15 @@ server {
     try_files /dist$uri /dist$uri/index.html /app$uri @default;
   }
 
-  # Routes de simulation : chacune peut déclencher un calcul OpenFisca, dont
-  # la concurrence est bornée par le nombre de workers gunicorn.
-  location /api/simulation {
-    limit_conn simulation_concurrency {{ simulation_max_concurrency | default(40) }};
-    limit_req  zone=simulation_per_ip burst=60 nodelay;
+  # Seules ces routes déclenchent un calcul OpenFisca : résultats, réponse et
+  # trace brutes, export téléservice, et les paramètres du moteur. Les autres
+  # routes /api/simulation ne coûtent qu'un accès Mongo et ne doivent pas
+  # consommer un budget dimensionné sur les workers gunicorn.
+  location ~ ^/api/(openfisca/|simulation/via/|simulation/[^/]+/(results|openfisca-)) {
+    {{ compute_limits_section() }}
+
+    # Le client Node abandonne à 25 s : au-delà, plus personne n'attend.
+    proxy_read_timeout 35s;
 
     {{ proxy_section('http://' + upstream_name ) }}
   }
@@ -166,6 +178,11 @@ server {
   }
   {% else %}
   location / {
+  {% if 'openfisca' in service_domain %}
+    # Ce vhost proxifie directement le pool gunicorn, sans authentification, et
+    # son URL est publiée au navigateur : il partage donc le même plafond.
+    {{ compute_limits_section() }}
+  {% endif %}
     {{ proxy_section('http://' + upstream_name ) }}
   }
   {% endif %}

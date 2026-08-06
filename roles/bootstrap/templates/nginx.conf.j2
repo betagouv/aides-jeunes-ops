@@ -29,10 +29,27 @@ http {
   # Rate Limiting
   ##
 
-  # Plafond global de requêtes simultanées sur les routes de simulation, qui
-  # déclenchent un calcul OpenFisca. Au-delà, nginx répond 503 immédiatement
-  # au lieu de laisser la file grossir jusqu'au 504.
-  limit_conn_zone $server_name zone=simulation_concurrency:1m;
+  # Une application est servie sous plusieurs noms d'hôte — son domaine, le nom
+  # complet du serveur pour le site par défaut, et le sous-domaine openfisca —
+  # qui partagent tous le même pool gunicorn. La clé du plafond doit donc être
+  # l'application, pas le vhost, sinon le budget est multiplié par autant de
+  # noms. Prod et preprod gardent des budgets distincts, leurs pools le sont.
+  map $host $simulation_app {
+    default "";
+{% for application in applications %}
+    {{ application.domain }} "{{ application.name }}";
+    openfisca.{{ application.domain }} "{{ application.name }}";
+  {% if application.default_site | default(false) and fullname is defined %}
+    {{ fullname }} "{{ application.name }}";
+    openfisca.{{ fullname }} "{{ application.name }}";
+  {% endif %}
+{% endfor %}
+  }
+
+  # Plafond global de requêtes simultanées sur les routes qui déclenchent un
+  # calcul OpenFisca. Au-delà, nginx répond 503 immédiatement au lieu de
+  # laisser la file grossir jusqu'au 504.
+  limit_conn_zone $simulation_app zone=simulation_concurrency:1m;
   limit_conn_status 503;
 
   # Garde-fou par IP contre un client qui martèle. Volontairement large : les

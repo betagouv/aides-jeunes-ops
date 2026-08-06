@@ -27,10 +27,27 @@
         src: templates/openfisca.service.j2
         dest: /etc/systemd/system/{{ openfisca_service_name }}.service
         mode: "0644"
+      register: openfisca_unit
       notify: Reload systemd
+    # Le `Environment=` de l'unité n'entre dans le processus qu'à l'exec :
+    # gunicorn relit bien sa configuration sur SIGHUP, mais `config.py` lit
+    # l'environnement figé. Seul un redémarrage propage OPENFISCA_WORKERS.
+    # Un handler ne convient pas : il est différé en fin de play et dédupliqué,
+    # alors que `openfisca_service_name` vaut une valeur différente par
+    # application. Seule la dernière serait redémarrée.
+    - name: Apply the new unit definition of {{ openfisca_service_name }} # noqa: no-handler
+      become: true
+      become_method: ansible.builtin.sudo
+      when: openfisca_unit is changed
+      ansible.builtin.systemd:
+        name: "{{ openfisca_service_name }}"
+        daemon_reload: true
+        state: restarted
+        enabled: true
     - name: Reload or start {{ openfisca_service_name }}
       become: true
       become_method: ansible.builtin.sudo
+      when: openfisca_unit is not changed
       changed_when: false
       ansible.builtin.service:
         name: "{{ openfisca_service_name }}"
