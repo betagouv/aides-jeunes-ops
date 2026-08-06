@@ -34,8 +34,14 @@ http {
   # qui partagent tous le même pool gunicorn. La clé du plafond doit donc être
   # l'application, pas le vhost, sinon le budget est multiplié par autant de
   # noms. Prod et preprod gardent des budgets distincts, leurs pools le sont.
+  # Les noms d'hôte dépassent le godet par défaut de 64 octets, comme pour
+  # server_names_hash_bucket_size ci-dessus : sans ça nginx refuse de démarrer.
+  map_hash_bucket_size 128;
+
   map $host $simulation_app {
-    default "";
+    # Un hôte inconnu ne doit pas produire une clé vide, qui désactiverait
+    # silencieusement le comptage.
+    default "unknown";
 {% for application in applications %}
     {{ application.domain }} "{{ application.name }}";
     openfisca.{{ application.domain }} "{{ application.name }}";

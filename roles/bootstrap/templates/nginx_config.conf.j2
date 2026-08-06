@@ -37,8 +37,11 @@
    par IP volontairement large : les mobiles partagent les IP de sortie CGNAT
    des opérateurs, une limite serrée pénaliserait des utilisateurs légitimes. #}
 {% macro compute_limits_section() -%}
-    limit_conn simulation_concurrency {{ simulation_max_concurrency | default(24) }};
+    limit_conn simulation_concurrency {{ simulation_max_concurrency | default((item.openfisca_worker_number | default(3)) * 3) }};
     limit_req  zone=simulation_per_ip burst=60 nodelay;
+
+    # Le client Node abandonne à 25 s : au-delà, plus personne n'attend.
+    proxy_read_timeout 35s;
 {%- endmacro %}
 
 {% macro well_known_section(webroot_path, proxy) -%}
@@ -164,11 +167,10 @@ server {
   # trace brutes, export téléservice, et les paramètres du moteur. Les autres
   # routes /api/simulation ne coûtent qu'un accès Mongo et ne doivent pas
   # consommer un budget dimensionné sur les workers gunicorn.
-  location ~ ^/api/(openfisca/|simulation/via/|simulation/[^/]+/(results|openfisca-)) {
+  # Insensible à la casse : nginx compare des octets, Express route sans tenir
+  # compte de la casse. Un `/API/` suffirait sinon à passer à côté du plafond.
+  location ~* ^/api/(openfisca/|simulation/via/|simulation/[^/]+/(results|openfisca-)) {
     {{ compute_limits_section() }}
-
-    # Le client Node abandonne à 25 s : au-delà, plus personne n'attend.
-    proxy_read_timeout 35s;
 
     {{ proxy_section('http://' + upstream_name ) }}
   }
