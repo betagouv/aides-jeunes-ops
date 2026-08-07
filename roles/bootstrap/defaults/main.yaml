@@ -105,14 +105,19 @@ alerting_sweep_on_calendar: "*-*-* 08:15:00"
 # échec n'a pas besoin de trente tickets : les premières suffisent à alerter,
 # et le décompte complet part dans le journal.
 alerting_sweep_max_events: 10
-# Hôtes vers lesquels le DSN a le droit de pointer, motifs glob acceptés
-# (« *.ingest.sentry.io »). Le DSN vient d'un fichier que possède l'utilisateur
-# de déploiement : il décide donc où partent les journaux d'unités root que les
-# alertes emportent, et permettrait d'éteindre toute la supervision en la
-# redirigeant vers un puits qui répond 200.
-# Liste vide = épinglage sur premier usage : le premier passage adopte l'hôte
-# trouvé dans le .env, tout changement ultérieur est refusé, et le DSN déjà en
-# place continue de servir. C'est le défaut parce qu'il ne suppose rien de
-# l'hôte réel — il ne peut donc pas couper l'alerte en production le jour du
-# déploiement. Renseigner la liste dès que l'hôte est connu : c'est plus sûr.
-alerting_dsn_allowed_hosts: []
+# Destinations vers lesquelles le DSN a le droit de pointer, motifs glob
+# acceptés. Une destination est « hôte[:port]/projet », par exemple
+# « o1.ingest.sentry.io/4507 ». L'hôte SEUL ne suffirait pas : créer un second
+# projet sur le même Sentry — mutualisé ou auto-hébergé — rouvrirait tout le
+# détournement sans changer un caractère de l'hôte. La clé, elle, reste libre :
+# c'est le seul champ qui doit pouvoir tourner.
+# Le DSN vient d'un fichier que possède l'utilisateur de déploiement : il décide
+# donc où partent les journaux d'unités root que les alertes emportent, et
+# pourrait éteindre toute la supervision derrière un puits qui répond 200.
+# Liste vide = épinglage sur premier usage : la première destination vue est
+# adoptée — et l'adoption sort en rouge au déploiement, parce que personne ne
+# l'a vérifiée — puis tout changement est refusé. C'est le défaut parce qu'il ne
+# suppose rien de l'instance Sentry réelle, donc qu'il ne peut pas couper
+# l'alerte en production le jour du déploiement.
+# Renseigner la liste dès que la destination est connue : c'est plus sûr.
+alerting_dsn_allowed_destinations: []

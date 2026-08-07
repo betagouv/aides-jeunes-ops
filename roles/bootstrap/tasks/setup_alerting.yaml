@@ -77,8 +77,28 @@
   ansible.builtin.command:
     cmd: timeout 60 {{ alerting_dsn_sync_script_path }}
   register: alerting_dsn_sync
-  changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
+  changed_when: >-
+    'DSN mis à jour.' in alerting_dsn_sync.stdout
+    or 'DSN adopté' in alerting_dsn_sync.stdout
   failed_when: false
+# Adopter une destination sans rien à quoi la comparer n'est pas une
+# vérification, c'est un pari. Il est tenu parce que l'alternative — refuser —
+# laisserait la supervision éteinte sur toute machine où personne n'a renseigné
+# la liste. Mais il doit se voir : `setup_alerting` tourne avant le
+# provisionnement des applications, donc l'adoption a lieu au deuxième bootstrap,
+# quand l'utilisateur de déploiement tourne déjà et peut avoir écrit le .env.
+- name: Check that no Sentry destination was adopted unverified
+  when: alerting_dsn_source | length > 0
+  ansible.builtin.assert:
+    that: "'DSN adopté' not in alerting_dsn_sync.stdout"
+    fail_msg: >-
+      {{ alerting_dsn_sync.stdout | default('') | trim }}
+      Aucune destination n'était épinglée et `alerting_dsn_allowed_destinations` est vide :
+      celle du .env vient d'être adoptée sans avoir été vérifiée. Confirmer qu'elle est
+      légitime, puis la figer dans `alerting_dsn_allowed_destinations`.
+    quiet: true
+  register: alerting_dsn_adoption_check
+  ignore_errors: true
 - name: Check that the Sentry DSN could be copied
   when: alerting_dsn_source | length > 0
   ansible.builtin.assert:

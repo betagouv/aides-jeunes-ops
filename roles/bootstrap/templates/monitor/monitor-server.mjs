@@ -3,7 +3,11 @@ import { execFileSync } from "child_process"
 import configuration from "./monitor-config.json" with { type: "json" }
 
 const services = configuration.applications
-const units = configuration.units
+// Repli sur une liste vide : ce fichier de configuration et ce serveur sont
+// posés par la même tâche ansible et bougent ensemble, mais une page de
+// supervision ne doit pas être ce qui tombe en premier quand quelque chose
+// cloche autour d'elle.
+const units = configuration.units ?? []
 
 // Toute commande lancée ici est synchrone et bloque la boucle d'événements pour
 // *toutes* les requêtes en cours : sans délai de garde, un `df` sur un montage
@@ -102,17 +106,20 @@ function getUnitStates() {
       subState: properties.SubState,
       result: properties.Result,
       // Liste blanche d'états sains, et non « tout sauf failed ». Un `oneshot`
-      // figé sur une connexion jamais répondue reste « activating », ce qui
-      // n'est pas un échec pour systemd : le déclarer vert ferait certifier par
-      // le témoin de dernier recours que tout va bien, précisément quand la
-      // chaîne d'alerte est morte. Une sauvegarde légitimement en cours apparaît
-      // donc aussi en non-vert le temps qu'elle tourne — c'est une information,
-      // pas une fausse alerte.
+      // figé reste « activating », ce qui n'est pas un échec pour systemd : le
+      // déclarer vert ferait certifier par le témoin de dernier recours que tout
+      // va bien, précisément quand la chaîne d'alerte est morte. Une sauvegarde
+      // légitimement en cours apparaît donc aussi en non-vert le temps qu'elle
+      // tourne — c'est une information, pas une fausse alerte.
+      // `reloading` est sain : c'est un état actif, celui d'un `systemctl reload
+      // nginx` en cours.
       ok:
         properties.LoadState === "loaded" &&
         (expectActive
-          ? activeState === "active"
-          : activeState === "active" || activeState === "inactive"),
+          ? activeState === "active" || activeState === "reloading"
+          : activeState === "active" ||
+            activeState === "reloading" ||
+            activeState === "inactive"),
     }
   })
 }
@@ -131,6 +138,30 @@ async function fetchURLStatus(url) {
 
 const port = 8887
 createServer(async (req, res) => {
+  // Le corps entier est protégé : le gestionnaire est `async`, donc toute
+  // exception non rattrapée devient une promesse rejetée, et sous Node >= 15 une
+  // promesse rejetée non gérée TUE le processus. Chaque requête relancerait
+  // alors la mise à mort, `Restart=on-failure` épuiserait son quota en quelques
+  // secondes, et la page finirait en `failed` permanent — soit exactement la
+  // panne d'un an que ce service est censé aider à repérer.
+  try {
+    // La charge utile est construite AVANT d'écrire l'en-tête : écrire 200 puis
+    // échouer rendrait un corps d'erreur sous un code de succès, qu'aucune sonde
+    // extérieure ne verrait passer.
+    const payload = JSON.stringify(await collectStatus(), null, 2)
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.write(payload)
+  } catch (error) {
+    console.error("Error building the status payload:", error)
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+    }
+    res.write(JSON.stringify({ error: "status unavailable" }))
+  }
+  res.end()
+}).listen(port)
+
+async function collectStatus() {
   const result = {
     diskUsagePercentage: await getDiskUsage(),
     units: getUnitStates(),
@@ -173,9 +204,5 @@ createServer(async (req, res) => {
       status: await fetchURLStatus(openfiscaPublicUrl),
     })
   }
-  res.writeHead(200, {
-    "Content-Type": "application/json",
-  })
-  res.write(JSON.stringify(result, null, 2))
-  res.end()
-}).listen(port)
+  return result
+}

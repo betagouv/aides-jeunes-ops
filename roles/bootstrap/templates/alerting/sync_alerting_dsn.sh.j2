@@ -14,7 +14,7 @@ umask 0077
 
 source_env="{{ alerting_dsn_source }}"
 target_env="{{ alerting_env_file }}"
-allowed_hosts="{{ alerting_dsn_allowed_hosts | join(' ') }}"
+allowed_destinations="{{ alerting_dsn_allowed_destinations | join(' ') }}"
 
 fail() {
   printf 'SYNCHRONISATION DU DSN SENTRY IMPOSSIBLE : %s\n' "$1" >&2
@@ -84,48 +84,58 @@ esac
 # La validation ci-dessus porte sur la SYNTAXE. Il reste la DESTINATION, qui est
 # le vrai enjeu : ce DSN décide où partent les journaux d'unités root — mongod,
 # nginx, la sauvegarde — que le propriétaire du .env ne peut pas lire lui-même.
-# Le pointer vers un collecteur à soi, c'est à la fois exfiltrer ces journaux et
-# éteindre toute l'alerte derrière un puits qui répond 200, auto-contrôle
-# compris. Le contenu est traité comme hostile ; l'hôte doit l'être aussi.
-dsn_host="${dsn#*://}"
-dsn_host="${dsn_host#*@}"
-dsn_host="${dsn_host%%/*}"
-dsn_host="${dsn_host%%:*}"
-if [ -z "$dsn_host" ]; then
-  fail "SENTRY_CRON_DSN de $source_env ne comporte pas d'hôte"
+# Le pointer ailleurs, c'est à la fois exfiltrer ces journaux et éteindre toute
+# l'alerte derrière un puits qui répond 200, auto-contrôle compris.
+#
+# La destination, c'est l'hôte ET LE CHEMIN. S'arrêter à l'hôte ne ferme rien :
+# créer un second projet sur le même Sentry — mutualisé, auto-hébergé, ou un DSN
+# sans sous-domaine d'organisation — suffirait alors à tout détourner sans
+# changer un caractère de l'hôte. Seule la CLÉ reste libre : c'est le seul champ
+# qui doit pouvoir tourner.
+dsn_destination="${dsn#*://}"
+dsn_destination="${dsn_destination#*@}"
+if [ -z "$dsn_destination" ] || [ "$dsn_destination" = "$dsn" ]; then
+  fail "SENTRY_CRON_DSN de $source_env ne comporte pas de destination exploitable"
 fi
 
-if [ -n "$allowed_hosts" ]; then
-  # Ancrage explicite : `alerting_dsn_allowed_hosts` est renseigné, l'hôte doit y
-  # figurer. C'est le réglage le plus sûr, à privilégier une fois l'hôte connu.
-  host_allowed=0
-  for allowed in $allowed_hosts; do
-    # shellcheck disable=SC2254 # motif glob voulu, pour autoriser « *.exemple.tld »
-    case "$dsn_host" in
+if [ -n "$allowed_destinations" ]; then
+  # Ancrage explicite : `alerting_dsn_allowed_destinations` est renseigné, la
+  # destination doit y figurer. C'est le réglage le plus sûr, à privilégier dès
+  # que l'hôte et le projet sont connus.
+  destination_allowed=0
+  for allowed in $allowed_destinations; do
+    # shellcheck disable=SC2254 # motif glob voulu, pour autoriser « *.exemple.tld/4 »
+    case "$dsn_destination" in
       $allowed)
-        host_allowed=1
+        destination_allowed=1
         break
         ;;
     esac
   done
-  if [ "$host_allowed" -eq 0 ]; then
-    fail "hôte « $dsn_host » absent de alerting_dsn_allowed_hosts — refus de rediriger l'alerte"
+  if [ "$destination_allowed" -eq 0 ]; then
+    fail "destination « $dsn_destination » absente de alerting_dsn_allowed_destinations — refus de rediriger l'alerte"
   fi
 elif [ -f "$target_env" ]; then
-  # Aucun ancrage déclaré : on épingle sur ce qui est déjà en place. Le premier
-  # passage adopte l'hôte du .env — sur un serveur en service, c'est le bon —, et
-  # tout changement ultérieur est refusé. Le DSN en place continue de fonctionner
-  # pendant ce temps : le refus ne coupe pas l'alerte, il la protège.
-  # Rotation légitime vers un autre hôte : renseigner alerting_dsn_allowed_hosts,
-  # ou supprimer le fichier cible pour ré-adopter.
-  current_host="$(sed -n 's/^SENTRY_DSN=//p' "$target_env" | tail -n 1)"
-  current_host="${current_host#*://}"
-  current_host="${current_host#*@}"
-  current_host="${current_host%%/*}"
-  current_host="${current_host%%:*}"
-  if [ -n "$current_host" ] && [ "$current_host" != "$dsn_host" ]; then
-    fail "changement d'hôte refusé : « $current_host » est en place, le .env propose « $dsn_host ». Renseigner alerting_dsn_allowed_hosts, ou supprimer $target_env pour ré-adopter."
+  # Aucun ancrage déclaré : on épingle sur ce qui est déjà en place. Tout
+  # changement de destination est refusé, et le DSN en place continue de
+  # fonctionner pendant ce temps — le refus ne coupe pas l'alerte, il la protège.
+  # Rotation légitime : renseigner alerting_dsn_allowed_destinations, ou
+  # supprimer le fichier cible pour ré-adopter.
+  current_destination="$(sed -n 's/^SENTRY_DSN=//p' "$target_env" | tail -n 1)"
+  current_destination="${current_destination#*://}"
+  current_destination="${current_destination#*@}"
+  if [ -n "$current_destination" ] && [ "$current_destination" != "$dsn_destination" ]; then
+    fail "changement de destination refusé : « $current_destination » est en place, le .env propose « $dsn_destination ». Renseigner alerting_dsn_allowed_destinations, ou supprimer $target_env pour ré-adopter."
   fi
+else
+  # Ni liste blanche, ni destination déjà épinglée : il n'y a rien à quoi
+  # comparer. On adopte, mais on le DIT — l'adoption est signalée à part pour
+  # sortir en rouge côté ansible.
+  # Ce cas n'est pas théorique : `setup_alerting` tourne avant le
+  # provisionnement des applications, donc au tout premier bootstrap le .env
+  # n'existe pas encore et l'adoption n'a lieu qu'au passage suivant, quand
+  # l'utilisateur de déploiement tourne déjà.
+  adopted=1
 fi
 
 candidate="$target_env.candidate"
@@ -142,4 +152,8 @@ if cmp -s "$candidate" "$target_env"; then
 fi
 
 mv "$candidate" "$target_env"
-printf 'DSN mis à jour.\n'
+if [ "${adopted:-0}" -eq 1 ]; then
+  printf 'DSN adopté sans point de comparaison : %s\n' "$dsn_destination"
+else
+  printf 'DSN mis à jour.\n'
+fi

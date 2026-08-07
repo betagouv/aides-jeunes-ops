@@ -228,7 +228,7 @@ a thought for anything that handles user data.
 | `alerting_watched_units` | backup service + timer, `monitor_service`, `mongod`, `nginx`, the sweep itself | Units getting an `OnFailure=` drop-in; those with `expect_active: true` must also be running |
 | `alerting_sweep_on_calendar` | `*-*-* 08:15:00` | `OnCalendar=` of the daily sweep |
 | `alerting_sweep_max_events` | `10` | Cap on events per sweep, so a machine on fire does not open thirty issues |
-| `alerting_dsn_allowed_hosts` | `[]` | Hosts the DSN may point to; empty means pin-on-first-use (see below) |
+| `alerting_dsn_allowed_destinations` | `[]` | `host[:port]/project` values the DSN may point to; empty means pin-on-first-use (see below) |
 
 Adding a unit is two lines in `alerting_watched_units`. The name must carry its systemd
 suffix — `nginx.service`, not `nginx` — or the drop-in lands in a directory systemd does not
@@ -237,13 +237,14 @@ names the offending entries. The page on `monitor.<fullname>` also publishes the
 these units next to its URL probes.
 
 **Nothing in this chain is allowed to wait forever.** `sentry-cli` has no timeout option of
-its own, so every call is wrapped in `timeout 30`, and both units carry a `TimeoutStartSec=`.
-Without them, a connection that is accepted and never answered — a stateful firewall, a NAT,
-a saturated ingest — leaves the sweep `activating` indefinitely; systemd then merges the next
-day's trigger into the job already running, and **the alerting stops for good without
-anything ever turning `failed`**. The status page treats a long `activating` as not-ok for
-the same reason: the witness of last resort must not certify that all is well while the chain
-is dead.
+its own, so every call is wrapped in `timeout -k 5 30`, and both units carry a
+`TimeoutStartSec=` — derived from `alerting_sweep_max_events` for the sweep, so raising the
+cap does not silently truncate it. Without those, a connection that is accepted and never
+answered — a stateful firewall, a NAT, a saturated ingest — leaves the sweep `activating`
+indefinitely; systemd then merges the next day's trigger into the job already running, and
+**the alerting stops for good without anything ever turning `failed`**. The status page
+treats `activating` as not-ok for the same reason: the witness of last resort must not
+certify that all is well while the chain is dead.
 
 #### Where the DSN comes from
 
@@ -283,21 +284,30 @@ unit is not a bug you want to discover in production.
 Validating the syntax is not enough, because the DSN also decides **where the alerts go**, and
 they carry the journals of root units the deployment user cannot read. Whoever can write the
 `.env` could therefore both exfiltrate those journals and switch the whole supervision off by
-pointing it at a sink that answers `200` — the self-test included. So the **host** is anchored
-too:
+pointing it at a sink that answers `200` — the self-test included. So the **destination** is
+anchored too.
 
-- if `alerting_dsn_allowed_hosts` is set, the host must match one of its patterns
-  (`*.ingest.sentry.io` and the like). Use this as soon as the real host is known;
-- if it is empty — the default — the host is **pinned on first use**: the first run adopts
-  whatever the `.env` says, and any later change of host is refused. The DSN already in place
-  keeps working meanwhile, so the refusal protects the alerting instead of cutting it.
+Destination means **host *and* path** — `o1.ingest.sentry.io/4507`, not just the host.
+Anchoring the host alone closes nothing: on a shared or self-hosted Sentry, creating a second
+project on the same host is trivial, and every alert would go there without a single
+character of the host changing. The **key** is the one field left free, because it is the one
+that has to rotate.
+
+- if `alerting_dsn_allowed_destinations` is set, the destination must match one of its
+  patterns. Use this as soon as the real one is known;
+- if it is empty — the default — the destination is **pinned on first use**: the first run
+  adopts what the `.env` says and any later change is refused. The DSN already in place keeps
+  working meanwhile, so the refusal protects the alerting instead of cutting it.
 
 The default is pin-on-first-use rather than a hardcoded list because this repository cannot
 know which Sentry instance the project uses, and a wrong guess would silence production
-alerting on the very day it is deployed. Changing host legitimately means setting
-`alerting_dsn_allowed_hosts`, or deleting `/etc/aides-jeunes/alerting.env` to re-adopt. Only
-the host is pinned: rotating the key, or changing the port or project id, goes through
-untouched.
+alerting on the very day it is deployed. That first adoption is a bet, not a check — there is
+nothing to compare against — so **it is reported as a failed (ignored) task naming the
+adopted destination**. It deserves a look: `setup_alerting` runs *before* the applications
+are provisioned, so on a brand new machine the `.env` does not exist yet and the adoption
+happens on the second bootstrap, by which time the deployment user is already running.
+Confirm the destination, then freeze it in `alerting_dsn_allowed_destinations`. Deleting
+`/etc/aides-jeunes/alerting.env` re-adopts.
 
 If the `.env` is not there yet — a brand new machine — or if the DSN is malformed, the play
 prints a warning and carries on rather than blocking the application deployment, and the
@@ -358,6 +368,14 @@ and it is not done here.
 
 **Removing a unit from `alerting_watched_units` leaves its drop-in behind.** Ansible writes
 `/etc/systemd/system/<unit>.d/50-onfailure.conf` and never removes it; delete it by hand.
+
+**The status page goes red every night during the backup.** `activating` is never counted as
+healthy, and `mongodb-backup.service` is `activating` for as long as `mongodump` runs. So
+from 03:30 onwards, for the duration of the dump, the public page shows that unit as
+`"ok": false`. That is the deliberate price of not letting a stuck `oneshot` look green — and
+note that the danger this rule guards against, the endless wait, is also addressed by
+`TimeoutStartSec=`; the rule is the second line of defence, not the only one. `reloading` is
+counted as healthy, so a `systemctl reload nginx` does not trip it.
 
 **The status page still queries systemd synchronously.** One `systemctl show` covers every
 unit, capped at two seconds, so a systemd that stops answering costs the page two seconds

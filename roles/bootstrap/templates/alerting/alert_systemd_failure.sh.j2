@@ -89,10 +89,19 @@ unit_property() {
   systemctl show "$1" --property="$2" --value
 }
 
+# Comparaison de chaînes, et non filtrage par motif : un nom d'unité peut porter
+# une échappée systemd (« var-lib\x2ddocker.mount »), et le contre-oblique
+# ferait rater la reconnaissance dans un motif `case` — d'où journal non joint et
+# double émission pour la même unité.
 in_list() {
-  case " $2 " in
-    *" $1 "*) return 0 ;;
-  esac
+  local needle="$1"
+  local item
+  # shellcheck disable=SC2086 # découpage voulu : un nom d'unité n'a pas d'espace
+  for item in $2; do
+    if [ "$item" = "$needle" ]; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -128,7 +137,7 @@ send_event() {
   # --no-environ : sans ce drapeau, sentry-cli joint l'environnement du
   # processus à l'événement. Ce script tourne en root et porte un DSN.
   status=0
-  SENTRY_DSN="$SENTRY_DSN" timeout "$sentry_timeout_seconds" sentry-cli send-event \
+  SENTRY_DSN="$SENTRY_DSN" timeout -k 5 "$sentry_timeout_seconds" sentry-cli send-event \
     --no-environ \
     --level error \
     --message "$summary" \
@@ -232,7 +241,7 @@ sweep() {
 # une machine où aucune alerte ne partira jamais — soit exactement le silence
 # qu'il est censé casser.
 self_test() {
-  SENTRY_DSN="$SENTRY_DSN" timeout "$sentry_timeout_seconds" sentry-cli send-event \
+  SENTRY_DSN="$SENTRY_DSN" timeout -k 5 "$sentry_timeout_seconds" sentry-cli send-event \
     --no-environ \
     --level info \
     --message "systemd : chaîne d'alerte installée et joignable — $hostname_fqdn" \
