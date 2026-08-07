@@ -1,0 +1,50 @@
+---
+- name: Set mongodb backup variables
+  ansible.builtin.set_fact:
+    mongodb_backup_service_name: mongodb-backup
+    mongodb_backup_script_path: /usr/local/sbin/mongodb-backup.sh
+# Le répertoire est délibérément hors de tout arbre servi par nginx
+# (/var/www pour /.well-known, /home/{{ server_user_name }}/*/repository pour
+# les fichiers statiques) et hors du dépôt ops synchronisé dans /opt/mes-aides.
+# 0700 root:root : les archives contiennent la base complète, données
+# personnelles et financières comprises.
+- name: Create MongoDB backup directory
+  ansible.builtin.file:
+    path: "{{ mongodb_backup_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+- name: Install MongoDB backup script
+  ansible.builtin.template:
+    src: templates/mongodb_backup.sh.j2
+    dest: "{{ mongodb_backup_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+- name: Setup MongoDB backup service
+  ansible.builtin.template:
+    src: templates/mongodb-backup.service.j2
+    dest: /etc/systemd/system/{{ mongodb_backup_service_name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+- name: Setup MongoDB backup timer
+  ansible.builtin.template:
+    src: templates/mongodb-backup.timer.j2
+    dest: /etc/systemd/system/{{ mongodb_backup_service_name }}.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+# Le gestionnaire de rechargement est différé jusqu'au prochain point de
+# synchronisation : sans ce drapeau, systemd travaillerait sur les anciennes
+# définitions d'unités.
+- name: Reload systemd before enabling the timer
+  ansible.builtin.meta: flush_handlers
+- name: Enable and start MongoDB backup timer
+  ansible.builtin.systemd:
+    name: "{{ mongodb_backup_service_name }}.timer"
+    enabled: true
+    state: started

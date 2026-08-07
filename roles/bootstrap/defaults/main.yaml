@@ -14,3 +14,32 @@ node_version: "24"
 # changed_when: "'python3.11' not in python_installed.stdout"
 python_version: "3.11.4"
 python_control_version: "3.11"
+
+# Sauvegarde MongoDB
+# Bases sauvegardées, une archive par base et par exécution. `db_aides_jeunes`
+# est la base de production ; la preprod est reconstruite depuis la prod et
+# n'est pas sauvegardée, la conserver ne ferait qu'élargir l'empreinte de
+# données personnelles.
+mongodb_backup_databases:
+  - db_aides_jeunes
+# Hors de tout arbre servi par nginx et hors du dépôt ops (/opt/mes-aides) :
+# voir le commentaire de setup_mongodb_backup.yaml.
+mongodb_backup_directory: /var/backups/mongodb
+mongodb_backup_host: 127.0.0.1
+mongodb_backup_port: 27017
+# 03h30 : creux de trafic, et aucun autre travail planifié — les stats tournent
+# à 02h23, l'envoi de courriels à 04h08, l'anonymisation à 05h00, certbot à
+# 02h00. La sauvegarde passe donc avant l'anonymisation du jour.
+mongodb_backup_on_calendar: "*-*-* 03:30:00"
+# 14 jours. Le disque n'est pas le facteur limitant (1,7 To libres pour une
+# archive de l'ordre du gigaoctet) ; la contrainte est le RGPD. Les archives ne
+# sont pas anonymisées : elles prolongent d'autant la conservation des données
+# que `tools:cleaner` efface chaque jour à 05h00. 14 jours couvre une erreur
+# logique détectée après une absence prolongée sans conserver un historique que
+# rien ne justifie. À arbitrer avec l'équipe et le DPD.
+mongodb_backup_retention_days: 14
+# Plancher de vraisemblance. mongodump réussit et retourne 0 sur une base
+# inexistante ou vide, en produisant une archive de quelques centaines
+# d'octets : sans ce seuil, une faute de frappe dans le nom d'une base
+# produirait des sauvegardes vides pendant des mois sans un seul signal.
+mongodb_backup_min_archive_bytes: 4096

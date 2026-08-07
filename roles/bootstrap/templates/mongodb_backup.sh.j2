@@ -1,0 +1,128 @@
+#!/bin/bash
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/mongodb_backup.sh.j2
+
+# Une archive compressée par base et par exécution, vérifiée avant d'être
+# publiée sous son nom définitif, puis rotation des archives expirées.
+#
+# Toute anomalie interrompt le script avec un code non nul : le service systemd
+# passe en `failed`, visible dans `systemctl status` et dans le journal. Aucun
+# repli silencieux — une sauvegarde qu'on croit faite est pire que pas de
+# sauvegarde.
+
+set -euo pipefail
+
+# Les archives contiennent la base complète : données personnelles et
+# financières. Tout ce que ce script crée n'est lisible que par root.
+umask 0077
+
+backup_dir="{{ mongodb_backup_directory }}"
+mongo_host="{{ mongodb_backup_host }}"
+mongo_port="{{ mongodb_backup_port }}"
+retention_days="{{ mongodb_backup_retention_days }}"
+min_archive_bytes="{{ mongodb_backup_min_archive_bytes }}"
+databases=({% for database in mongodb_backup_databases %}"{{ database }}" {% endfor %})
+
+fail() {
+  printf 'ÉCHEC DE LA SAUVEGARDE MONGODB : %s\n' "$1" >&2
+  exit 1
+}
+
+if [ ! -d "$backup_dir" ]; then
+  fail "le répertoire de sauvegarde $backup_dir n'existe pas"
+fi
+
+if [ "$retention_days" -lt 1 ]; then
+  fail "rétention invalide ($retention_days jours) : au moins 1 jour est requis"
+fi
+
+for tool in mongodump mongorestore gzip; do
+  command -v "$tool" >/dev/null ||
+    fail "$tool est introuvable, impossible de sauvegarder ou de vérifier"
+done
+
+# Test sur la concaténation, et non sur le cardinal du tableau : la syntaxe
+# bash du cardinal accole une accolade et un dièse, que Jinja lit comme une
+# ouverture de commentaire — le gabarit ne se rend alors plus du tout.
+if [ -z "${databases[*]}" ]; then
+  fail "aucune base à sauvegarder : mongodb_backup_databases est vide"
+fi
+
+timestamp="$(date +%Y%m%dT%H%M%S)"
+
+# Un arrêt brutal pendant un dump laisse un fichier de travail que rien ne
+# reprendra. La rotation ne le voit pas — elle ne retient que *.archive.gz —,
+# il immobiliserait donc sa taille indéfiniment.
+find "$backup_dir" -maxdepth 1 -type f -name '*.archive.gz.partial' -print -delete
+
+for database in "${databases[@]}"; do
+  final="$backup_dir/$database-$timestamp.archive.gz"
+  # Le fichier de travail reste dans le répertoire fermé (0700) : une archive
+  # partielle n'est jamais visible ailleurs, et le renommage final est atomique
+  # puisqu'il a lieu sur le même système de fichiers. Le suffixe `.partial`
+  # l'exclut de la rotation et de toute restauration accidentelle.
+  partial="$final.partial"
+
+  printf 'Sauvegarde de %s depuis %s:%s\n' "$database" "$mongo_host" "$mongo_port"
+
+  # Aucun identifiant sur la ligne de commande : mongod n'écoute que sur la
+  # boucle locale et n'a pas d'authentification. Ajouter --username/--password
+  # ici les exposerait dans `ps` et dans le journal — passer par --config si
+  # l'authentification est un jour activée.
+  if ! mongodump \
+    --host="$mongo_host" \
+    --port="$mongo_port" \
+    --db="$database" \
+    --gzip \
+    --archive="$partial"; then
+    rm -f "$partial"
+    fail "mongodump a échoué pour $database sur $mongo_host:$mongo_port (cause ci-dessus)"
+  fi
+
+  size="$(stat --format=%s "$partial")"
+  if [ "$size" -lt "$min_archive_bytes" ]; then
+    rm -f "$partial"
+    fail "archive de $database anormalement petite ($size octets, plancher $min_archive_bytes) : base vide, inexistante ou mal nommée ?"
+  fi
+
+  # Relit l'archive entière et contrôle les sommes CRC et les longueurs de
+  # chaque bloc gzip. C'est ce qui attrape une écriture partielle, un disque
+  # plein ou une corruption silencieuse — vérifié : une archive tronquée ou
+  # dont un seul octet a changé est rejetée ici.
+  if ! gzip --test "$partial"; then
+    rm -f "$partial"
+    fail "l'archive de $database est corrompue ou tronquée : elle a été supprimée plutôt que conservée"
+  fi
+
+  # PIÈGE : `mongorestore --dryRun` ne lit *pas* le corps de l'archive. Il
+  # s'arrête au prélude et retourne 0 sur une archive tronquée comme sur une
+  # archive corrompue — d'où le `gzip --test` ci-dessus, qui fait le vrai
+  # travail. Ce contrôle-ci reste utile pour ce qu'il vérifie réellement : que
+  # mongorestore sait ouvrir le fichier et y reconnaître des collections, donc
+  # que l'archive est bien au format attendu par l'outil de restauration.
+  if ! mongorestore \
+    --host="$mongo_host" \
+    --port="$mongo_port" \
+    --gzip \
+    --archive="$partial" \
+    --dryRun; then
+    rm -f "$partial"
+    fail "l'archive de $database n'est pas une archive mongodump exploitable : elle a été supprimée plutôt que conservée"
+  fi
+
+  mv "$partial" "$final"
+  printf 'Archive vérifiée : %s (%s octets)\n' "$final" "$size"
+done
+
+# La rotation n'a lieu qu'après une sauvegarde réussie : une série d'échecs ne
+# doit jamais consommer les archives encore valides.
+printf 'Rotation : suppression des archives de plus de %s jours\n' "$retention_days"
+find "$backup_dir" \
+  -maxdepth 1 \
+  -type f \
+  -name '*.archive.gz' \
+  -mtime "+$((retention_days - 1))" \
+  -print \
+  -delete
+
+printf 'Sauvegarde MongoDB terminée.\n'

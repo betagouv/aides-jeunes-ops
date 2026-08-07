@@ -106,7 +106,96 @@ In order to setup continuous deployment, you will need to:
 - get the private key (see `ansible_ssh_private_key_file` in inventory)
 - set it up in your Github repository as a secret (see [here](https://github.com/betagouv/aides-jeunes/blob/400ab5f90219141b438388d58cd4f27f8fb0ebd6/.github/workflows/cd.yml#L48))
 
-### Backup mongodb collections
+### Automatic MongoDB backup
+
+The `bootstrap` role installs a scheduled backup of the production database. It is applied
+by `bootstrap.yaml` like the rest of the server configuration — there is nothing to run by
+hand.
+
+Every day at 03:30 a systemd timer runs `mongodb-backup.service`, which dumps each database
+listed in `mongodb_backup_databases` into a single compressed archive under
+`/var/backups/mongodb`, verifies it, then deletes archives older than the retention window.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `mongodb_backup_databases` | `[db_aides_jeunes]` | Databases to dump, one archive each |
+| `mongodb_backup_directory` | `/var/backups/mongodb` | Where archives are kept (`0700`, `root:root`) |
+| `mongodb_backup_host` / `mongodb_backup_port` | `127.0.0.1` / `27017` | Where mongod listens |
+| `mongodb_backup_on_calendar` | `*-*-* 03:30:00` | `OnCalendar=` expression for the timer |
+| `mongodb_backup_retention_days` | `14` | Archives older than this are deleted |
+| `mongodb_backup_min_archive_bytes` | `4096` | Sanity floor below which an archive is rejected |
+
+#### Checking that it works
+
+```bash
+systemctl list-timers mongodb-backup.timer   # when it last ran and when it runs next
+systemctl status mongodb-backup.service      # outcome of the last run
+journalctl -u mongodb-backup.service         # full history
+ls -l /var/backups/mongodb                   # the archives themselves (root only)
+```
+
+A run that fails leaves the service in `failed` state, so `systemctl status` and
+`systemctl list-units --failed` both report it. The script never swallows an error: a dump
+that fails, an archive that is too small, corrupt or truncated all abort the run with a
+non-zero exit code, and the bad archive is deleted rather than kept. Rotation only happens
+after a successful dump, so a run of failures can never eat the archives that are still good.
+
+You can trigger a run at any time with `systemctl start mongodb-backup.service`.
+
+#### Restoring
+
+Archives are plain `mongodump --archive --gzip` files. To inspect one without touching the
+live database, restore it under a different name:
+
+```bash
+mongorestore --gzip \
+  --archive=/var/backups/mongodb/db_aides_jeunes-20260807T033000.archive.gz \
+  --nsFrom='db_aides_jeunes.*' --nsTo='db_aides_jeunes_restore.*'
+```
+
+To restore the database in place, after a bad migration or an accidental deletion —
+this **replaces** the collections present in the archive:
+
+```bash
+systemctl stop mongodb-backup.timer   # avoid backing up the broken state mid-restore
+pm2 stop all                          # as user `main`, so nothing writes during the restore
+mongorestore --gzip --drop \
+  --archive=/var/backups/mongodb/db_aides_jeunes-20260807T033000.archive.gz
+pm2 start all
+systemctl start mongodb-backup.timer
+```
+
+`--drop` drops each collection just before restoring it. Collections created *after* the
+backup are not in the archive and are therefore left untouched — drop them by hand if the
+point is to get back to the exact state of the archive.
+
+#### Limits you need to know about
+
+**A backup on the same machine is not a backup.** These archives sit on the same disk as
+the database they protect. They cover a logical accident — a failed migration, a mistaken
+deletion, a bad `tools:cleaner` run — and nothing else. If the machine is lost, wiped, or
+its disk fails, the backups go with it, and so does the service. Making this a real backup
+means a copy on another machine, ideally another provider: a nightly `rclone` or `restic`
+push to object storage (OVH Object Storage, S3), encrypted client-side with a key that is
+*not* stored on the server, with its own retention and a restore drill. That is a hosting
+decision with a cost attached, so it is deliberately not implemented here — but until it
+exists, the single-machine failure mode is uncovered.
+
+**These archives extend how long personal data is kept.** The database holds personal and
+financial data, and a daily cron anonymises simulations and follow-ups at 05:00. The backups
+are *not* anonymised: an archive taken at 03:30 keeps a copy of everything the 05:00 job
+erases, for the whole retention window. A 14-day retention therefore means personal data
+survives its deletion by up to 14 days. This is a deliberate trade-off between recovery
+ability and data minimisation — it is the team's and the DPO's call, not a technical
+default, and `mongodb_backup_retention_days` is the knob. Whatever value is chosen should be
+reflected in the record of processing activities.
+
+### Migrating mongodb collections between servers
+
+> This is a manual, one-shot migration tool, **not** a backup. An operator triggers it, it
+> only covers the collections named in the inventory, and it deletes its archive from the
+> server afterwards. For the scheduled backup of the whole database, see
+> [Automatic MongoDB backup](#automatic-mongodb-backup) above.
 
 It is possible to dump mongodb collections from a server and restore them on another.
 
