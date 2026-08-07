@@ -228,9 +228,22 @@ a thought for anything that handles user data.
 | `alerting_watched_units` | backup service + timer, `monitor_service`, `mongod`, `nginx`, the sweep itself | Units getting an `OnFailure=` drop-in; those with `expect_active: true` must also be running |
 | `alerting_sweep_on_calendar` | `*-*-* 08:15:00` | `OnCalendar=` of the daily sweep |
 | `alerting_sweep_max_events` | `10` | Cap on events per sweep, so a machine on fire does not open thirty issues |
+| `alerting_dsn_allowed_hosts` | `[]` | Hosts the DSN may point to; empty means pin-on-first-use (see below) |
 
-Adding a unit is two lines in `alerting_watched_units`. The page on `monitor.<fullname>` also
-publishes the state of these units next to its URL probes.
+Adding a unit is two lines in `alerting_watched_units`. The name must carry its systemd
+suffix — `nginx.service`, not `nginx` — or the drop-in lands in a directory systemd does not
+read and the unit counts twice during the sweep; a check in the role refuses such a list and
+names the offending entries. The page on `monitor.<fullname>` also publishes the state of
+these units next to its URL probes.
+
+**Nothing in this chain is allowed to wait forever.** `sentry-cli` has no timeout option of
+its own, so every call is wrapped in `timeout 30`, and both units carry a `TimeoutStartSec=`.
+Without them, a connection that is accepted and never answered — a stateful firewall, a NAT,
+a saturated ingest — leaves the sweep `activating` indefinitely; systemd then merges the next
+day's trigger into the job already running, and **the alerting stops for good without
+anything ever turning `failed`**. The status page treats a long `activating` as not-ok for
+the same reason: the witness of last resort must not certify that all is well while the chain
+is dead.
 
 #### Where the DSN comes from
 
@@ -267,6 +280,25 @@ step:
 Any one of those would do; all three are there because a shell substitution reaching a root
 unit is not a bug you want to discover in production.
 
+Validating the syntax is not enough, because the DSN also decides **where the alerts go**, and
+they carry the journals of root units the deployment user cannot read. Whoever can write the
+`.env` could therefore both exfiltrate those journals and switch the whole supervision off by
+pointing it at a sink that answers `200` — the self-test included. So the **host** is anchored
+too:
+
+- if `alerting_dsn_allowed_hosts` is set, the host must match one of its patterns
+  (`*.ingest.sentry.io` and the like). Use this as soon as the real host is known;
+- if it is empty — the default — the host is **pinned on first use**: the first run adopts
+  whatever the `.env` says, and any later change of host is refused. The DSN already in place
+  keeps working meanwhile, so the refusal protects the alerting instead of cutting it.
+
+The default is pin-on-first-use rather than a hardcoded list because this repository cannot
+know which Sentry instance the project uses, and a wrong guess would silence production
+alerting on the very day it is deployed. Changing host legitimately means setting
+`alerting_dsn_allowed_hosts`, or deleting `/etc/aides-jeunes/alerting.env` to re-adopt. Only
+the host is pinned: rotating the key, or changing the port or project id, goes through
+untouched.
+
 If the `.env` is not there yet — a brand new machine — or if the DSN is malformed, the play
 prints a warning and carries on rather than blocking the application deployment, and the
 alerting scripts exit non-zero with an explicit message rather than pretending to send
@@ -283,6 +315,11 @@ It does not run on every deployment — one Sentry event per deployment would re
 each time — but it does run whenever something changed, or whenever `alerting.env` is
 missing, which covers every case where the chain can be broken without anyone knowing. The
 event carries the `systemd-alerting-self-test` fingerprint, so it stays in a single issue.
+
+The checks in this role are `assert` tasks with `ignore_errors: true`, not `debug` messages.
+The trade-off is deliberate — a broken alerting chain must not stop the application from
+deploying — but a warning buried in a green wall of output is not a signal. As asserts they
+come out red and show up as `ignored=` in the play recap.
 
 #### Checking that it works
 
@@ -303,9 +340,12 @@ triggers `OnFailure=`, and never shows up in `systemctl --failed`. What catches 
 URL probe on the status page returning 0 or 502 — which is why the two halves of that page
 are complementary and neither replaces the other.
 
-**Sentry is a single point of failure.** If the DSN is wrong, the project is full, or the
-network is down, nothing arrives. The failure is at least loud locally: `sentry-cli` exits
-non-zero, the alerting unit lands in `failed`, and the *next* sweep reports it — verified.
+**Sentry is a single point of failure.** If the DSN is wrong, the project is full, the
+network is down, or the ingest accepts connections without answering, nothing arrives. The
+failure is at least loud locally and bounded in time: `sentry-cli` exits non-zero — 124 when
+its own timeout fires — the alerting unit lands in `failed`, and the *next* sweep reports it
+— verified. A sweep against a host that never answers costs up to 30 s per event, so a full
+sweep at the default cap can take five minutes before failing.
 But a sweep whose timer has been disabled reports nothing at all and says nothing about it;
 the only remaining witness is then the status page, which is why the sweep units are in the
 watched list.

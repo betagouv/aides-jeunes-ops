@@ -19,13 +19,40 @@
     alerting_dsn_source: >-
       {{ ('/home/' ~ server_user_name ~ '/' ~ alerting_dsn_applications[0] ~ '/repository/.env')
          if (alerting_dsn_applications | length == 1) else '' }}
-- name: Report an inventory without exactly one default application
-  when: alerting_dsn_applications | length != 1
-  ansible.builtin.debug:
-    msg: >-
-      [WARNING] L'inventaire déclare {{ alerting_dsn_applications | length }} application(s)
+# Les contrôles de ce fichier sont des `assert` ignorés, et non des `debug` :
+# une chaîne d'alerte morte ne doit pas interrompre le déploiement de
+# l'application — le mécanisme censé signaler les pannes en deviendrait une —
+# mais un message noyé dans des centaines de lignes vertes n'est pas un signal.
+# Ignorés, ils sortent en rouge et font apparaître `ignored=` au récapitulatif.
+- name: Check that exactly one default application is declared
+  ansible.builtin.assert:
+    that: alerting_dsn_applications | length == 1
+    fail_msg: >-
+      L'inventaire déclare {{ alerting_dsn_applications | length }} application(s)
       avec `default_site: true` ; il en faut exactement une pour savoir où lire
       SENTRY_CRON_DSN. Les unités d'alerte sont installées mais resteront muettes.
+    quiet: true
+  register: alerting_default_application_check
+  ignore_errors: true
+# Sans suffixe systemd, le greffon atterrit dans un répertoire que systemd ne lit
+# pas — /etc/systemd/system/nginx.d au lieu de nginx.service.d — et la même unité
+# compte pour deux au balayage, sous deux empreintes différentes. La promesse
+# « ajouter une unité = deux lignes » suppose que ce contrôle existe.
+- name: Check that every watched unit name carries its systemd suffix
+  ansible.builtin.assert:
+    that: >-
+      alerting_watched_units | rejectattr('name', 'search',
+        '\.(service|timer|socket|mount|path|target|slice|scope|swap|automount|device)$')
+      | list | length == 0
+    fail_msg: >-
+      Ces unités de `alerting_watched_units` n'ont pas de suffixe systemd :
+      {{ alerting_watched_units | rejectattr('name', 'search',
+         '\.(service|timer|socket|mount|path|target|slice|scope|swap|automount|device)$')
+         | map(attribute='name') | join(', ') }}.
+      Leur greffon OnFailure= ne sera pas lu par systemd.
+    quiet: true
+  register: alerting_unit_names_check
+  ignore_errors: true
 - name: Create alerting configuration directory
   ansible.builtin.file:
     path: "{{ alerting_directory }}"
@@ -43,27 +70,27 @@
     mode: "0700"
 # Le .env applicatif n'est pas produit par ce dépôt : il est déposé à la main
 # sur le serveur. Sur une machine neuve il n'existe pas encore.
-# `failed_when: false` : une configuration d'alerte incomplète ne doit pas
-# interrompre le déploiement de l'application — le mécanisme censé signaler les
-# pannes serait alors lui-même une panne. L'échec n'est pas avalé pour autant :
-# il est rapporté juste en dessous, et l'auto-contrôle de fin de rôle le redit.
+# `timeout` en tête de commande : le module `command` n'a pas de délai de garde,
+# et un .env remplacé par un tube nommé bloquerait le déploiement sans fin.
 - name: Copy the Sentry DSN into the alerting environment file
   when: alerting_dsn_source | length > 0
   ansible.builtin.command:
-    cmd: "{{ alerting_dsn_sync_script_path }}"
+    cmd: timeout 60 {{ alerting_dsn_sync_script_path }}
   register: alerting_dsn_sync
   changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
   failed_when: false
-- name: Report a DSN that could not be copied
-  when:
-    - alerting_dsn_source | length > 0
-    - alerting_dsn_sync.rc != 0
-  ansible.builtin.debug:
-    msg: >-
-      [WARNING] SENTRY_CRON_DSN n'a pas pu être recopié dans {{ alerting_env_file }} :
+- name: Check that the Sentry DSN could be copied
+  when: alerting_dsn_source | length > 0
+  ansible.builtin.assert:
+    that: alerting_dsn_sync.rc == 0
+    fail_msg: >-
+      SENTRY_CRON_DSN n'a pas pu être recopié dans {{ alerting_env_file }} :
       {{ alerting_dsn_sync.stderr | default('') }}
       Les unités d'alerte échoueront bruyamment tant que ce sera le cas.
       Corriger {{ alerting_dsn_source }} puis rejouer bootstrap.yaml.
+    quiet: true
+  register: alerting_dsn_sync_check
+  ignore_errors: true
 - name: Install systemd failure alerting script
   ansible.builtin.template:
     src: templates/alerting/alert_systemd_failure.sh.j2
@@ -151,14 +178,17 @@
     or alerting_failure_unit is changed
     or alerting_sweep_unit is changed
   ansible.builtin.command:
-    cmd: "{{ alerting_script_path }} --self-test"
+    cmd: timeout 60 {{ alerting_script_path }} --self-test
   register: alerting_self_test
   changed_when: false
   failed_when: false
-- name: Report an alerting chain that cannot reach Sentry
-  when: alerting_self_test.rc | default(0) != 0
-  ansible.builtin.debug:
-    msg: >-
-      [WARNING] L'auto-contrôle a échoué : aucun événement n'a pu être émis vers Sentry.
+- name: Check that the alerting chain reaches Sentry
+  ansible.builtin.assert:
+    that: alerting_self_test.rc | default(0) == 0
+    fail_msg: >-
+      L'auto-contrôle a échoué : aucun événement n'a pu être émis vers Sentry.
       {{ alerting_self_test.stderr | default('') }}
       Les unités systemd en échec ne seront signalées à personne tant que ce sera le cas.
+    quiet: true
+  register: alerting_self_test_check
+  ignore_errors: true

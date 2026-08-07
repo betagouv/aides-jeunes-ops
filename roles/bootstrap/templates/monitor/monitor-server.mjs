@@ -1,5 +1,5 @@
 import { createServer } from "http"
-import { execSync, execFileSync } from "child_process"
+import { execFileSync } from "child_process"
 import configuration from "./monitor-config.json" with { type: "json" }
 
 const services = configuration.applications
@@ -13,9 +13,17 @@ const units = configuration.units
 const COMMAND_LIMITS = { timeout: 2000, killSignal: "SIGKILL" }
 
 function getDiskUsage() {
-  const command = "df | grep /$ | tr -s ' ' | cut -d ' ' -f 5 | tr -d '%'"
+  // Sans interpréteur de commandes : sur un pipeline lancé par un shell, le
+  // délai de garde ne tue que le shell et laisse les `df` derrière lui — ils
+  // s'accumulent alors à chaque requête, sur un point d'entrée public.
   try {
-    return execSync(command, COMMAND_LIMITS).toString().trim()
+    return execFileSync("df", ["--output=pcent", "/"], COMMAND_LIMITS)
+      .toString()
+      .trim()
+      .split("\n")
+      .pop()
+      .trim()
+      .replace("%", "")
   } catch (error) {
     console.error("An error occurred:", error)
     return "-"
@@ -93,10 +101,18 @@ function getUnitStates() {
       activeState,
       subState: properties.SubState,
       result: properties.Result,
+      // Liste blanche d'états sains, et non « tout sauf failed ». Un `oneshot`
+      // figé sur une connexion jamais répondue reste « activating », ce qui
+      // n'est pas un échec pour systemd : le déclarer vert ferait certifier par
+      // le témoin de dernier recours que tout va bien, précisément quand la
+      // chaîne d'alerte est morte. Une sauvegarde légitimement en cours apparaît
+      // donc aussi en non-vert le temps qu'elle tourne — c'est une information,
+      // pas une fausse alerte.
       ok:
         properties.LoadState === "loaded" &&
-        activeState !== "failed" &&
-        (!expectActive || activeState === "active"),
+        (expectActive
+          ? activeState === "active"
+          : activeState === "active" || activeState === "inactive"),
     }
   })
 }

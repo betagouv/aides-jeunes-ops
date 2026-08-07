@@ -11,6 +11,14 @@ Group=root
 EnvironmentFile=-{{ alerting_env_file }}
 ExecStart={{ alerting_script_path }} --sweep
 
+# Un `Type=oneshot` sans délai de garde hérite de `infinity`. Un balayage figé
+# sur une connexion acceptée mais jamais répondue resterait « activating » pour
+# toujours, et systemd fusionnerait le déclenchement du lendemain dans le job en
+# cours : l'alerte s'arrêterait définitivement, sans jamais passer en `failed`.
+# 600 s couvre le pire cas légitime — le plafond d'événements multiplié par le
+# délai de garde de sentry-cli — avec de la marge.
+TimeoutStartSec=600
+
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

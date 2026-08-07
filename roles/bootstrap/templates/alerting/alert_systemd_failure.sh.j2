@@ -23,7 +23,13 @@ set -euo pipefail
 
 env_file="{{ alerting_env_file }}"
 instance="{{ instance_name }}"
-max_events={{ alerting_sweep_max_events }}
+max_events="{{ alerting_sweep_max_events }}"
+# Délai de garde de chaque appel à sentry-cli. Il n'a pas d'option pour cela, et
+# une connexion TCP acceptée mais jamais répondue — pare-feu à états, NAT, ingest
+# saturé — le laisse attendre indéfiniment. Sans ce garde-fou, le balayage reste
+# « activating » pour toujours, le déclenchement quotidien suivant est fusionné
+# dans le job en cours, et l'alerte s'arrête définitivement.
+sentry_timeout_seconds=30
 # Listes plates, séparées par des espaces : un nom d'unité systemd ne contient
 # jamais d'espace. Un tableau bash obligerait à écrire son cardinal, dont la
 # syntaxe accole une accolade et un dièse que Jinja lit comme une ouverture de
@@ -47,6 +53,16 @@ fail() {
 command -v sentry-cli >/dev/null ||
   fail "sentry-cli est introuvable, aucun événement ne peut partir"
 
+# Le plafond est comparé par `[ … -ge … ]` à l'intérieur d'un `if` : bash y rend
+# une erreur d'opérande sans que `set -e` n'intervienne, et une valeur non
+# numérique désactiverait donc le plafond en silence.
+case "$max_events" in
+  '' | *[!0-9]*) fail "plafond d'événements invalide ($max_events) : un entier est attendu" ;;
+esac
+if [ "$max_events" -lt 1 ]; then
+  fail "plafond d'événements invalide ($max_events) : au moins 1 est requis"
+fi
+
 # Le DSN arrive normalement par `EnvironmentFile=` : systemd analyse le fichier
 # lui-même, sans interpréteur de commandes. Pour une exécution à la main, on le
 # relit ici — par extraction, JAMAIS par `source`. Le fichier dérive du .env
@@ -54,10 +70,14 @@ command -v sentry-cli >/dev/null ||
 # ce dernier l'exécution de code en root que l'extraction lui refuse côté
 # synchronisation.
 if [ -z "${SENTRY_DSN:-}" ]; then
-  if [ ! -r "$env_file" ]; then
-    fail "$env_file est absent ou illisible — rejouer bootstrap.yaml pour le réinstaller"
+  # `-f` et pas seulement `-r` : un tube nommé déposé à cet emplacement est
+  # lisible et bloquerait la lecture indéfiniment, en root.
+  if [ ! -f "$env_file" ] || [ ! -r "$env_file" ]; then
+    fail "$env_file est absent, illisible ou n'est pas un fichier ordinaire — rejouer bootstrap.yaml"
   fi
-  SENTRY_DSN="$(sed -n 's/^SENTRY_DSN=//p' "$env_file" | head -n 1)"
+  # `tail` et non `head` : avec `pipefail`, un `head` qui ferme le tube tue `sed`
+  # par SIGPIPE et le script sortirait en 141 sans un mot.
+  SENTRY_DSN="$(sed -n 's/^SENTRY_DSN=//p' "$env_file" | tail -n 1)"
 fi
 if [ -z "$SENTRY_DSN" ]; then
   fail "SENTRY_DSN est absent de $env_file"
@@ -108,7 +128,7 @@ send_event() {
   # --no-environ : sans ce drapeau, sentry-cli joint l'environnement du
   # processus à l'événement. Ce script tourne en root et porte un DSN.
   status=0
-  SENTRY_DSN="$SENTRY_DSN" sentry-cli send-event \
+  SENTRY_DSN="$SENTRY_DSN" timeout "$sentry_timeout_seconds" sentry-cli send-event \
     --no-environ \
     --level error \
     --message "$summary" \
@@ -212,7 +232,7 @@ sweep() {
 # une machine où aucune alerte ne partira jamais — soit exactement le silence
 # qu'il est censé casser.
 self_test() {
-  SENTRY_DSN="$SENTRY_DSN" sentry-cli send-event \
+  SENTRY_DSN="$SENTRY_DSN" timeout "$sentry_timeout_seconds" sentry-cli send-event \
     --no-environ \
     --level info \
     --message "systemd : chaîne d'alerte installée et joignable — $hostname_fqdn" \

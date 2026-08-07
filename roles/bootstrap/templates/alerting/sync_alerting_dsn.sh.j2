@@ -14,14 +14,17 @@ umask 0077
 
 source_env="{{ alerting_dsn_source }}"
 target_env="{{ alerting_env_file }}"
+allowed_hosts="{{ alerting_dsn_allowed_hosts | join(' ') }}"
 
 fail() {
   printf 'SYNCHRONISATION DU DSN SENTRY IMPOSSIBLE : %s\n' "$1" >&2
   exit 1
 }
 
-if [ ! -r "$source_env" ]; then
-  fail "$source_env est absent ou illisible"
+# `-f` et pas seulement `-r` : un tube nommé déposé à cet emplacement par le
+# propriétaire du .env est lisible, et bloquerait cette tâche root indéfiniment.
+if [ ! -f "$source_env" ] || [ ! -r "$source_env" ]; then
+  fail "$source_env est absent, illisible, ou n'est pas un fichier ordinaire"
 fi
 
 # `sed` plutôt que `source` : le .env appartient à l'utilisateur de déploiement
@@ -77,6 +80,53 @@ case "$dsn" in
   https://*@*/* | http://*@*/*) ;;
   *) fail "SENTRY_CRON_DSN de $source_env n'a pas la forme d'un DSN Sentry" ;;
 esac
+
+# La validation ci-dessus porte sur la SYNTAXE. Il reste la DESTINATION, qui est
+# le vrai enjeu : ce DSN décide où partent les journaux d'unités root — mongod,
+# nginx, la sauvegarde — que le propriétaire du .env ne peut pas lire lui-même.
+# Le pointer vers un collecteur à soi, c'est à la fois exfiltrer ces journaux et
+# éteindre toute l'alerte derrière un puits qui répond 200, auto-contrôle
+# compris. Le contenu est traité comme hostile ; l'hôte doit l'être aussi.
+dsn_host="${dsn#*://}"
+dsn_host="${dsn_host#*@}"
+dsn_host="${dsn_host%%/*}"
+dsn_host="${dsn_host%%:*}"
+if [ -z "$dsn_host" ]; then
+  fail "SENTRY_CRON_DSN de $source_env ne comporte pas d'hôte"
+fi
+
+if [ -n "$allowed_hosts" ]; then
+  # Ancrage explicite : `alerting_dsn_allowed_hosts` est renseigné, l'hôte doit y
+  # figurer. C'est le réglage le plus sûr, à privilégier une fois l'hôte connu.
+  host_allowed=0
+  for allowed in $allowed_hosts; do
+    # shellcheck disable=SC2254 # motif glob voulu, pour autoriser « *.exemple.tld »
+    case "$dsn_host" in
+      $allowed)
+        host_allowed=1
+        break
+        ;;
+    esac
+  done
+  if [ "$host_allowed" -eq 0 ]; then
+    fail "hôte « $dsn_host » absent de alerting_dsn_allowed_hosts — refus de rediriger l'alerte"
+  fi
+elif [ -f "$target_env" ]; then
+  # Aucun ancrage déclaré : on épingle sur ce qui est déjà en place. Le premier
+  # passage adopte l'hôte du .env — sur un serveur en service, c'est le bon —, et
+  # tout changement ultérieur est refusé. Le DSN en place continue de fonctionner
+  # pendant ce temps : le refus ne coupe pas l'alerte, il la protège.
+  # Rotation légitime vers un autre hôte : renseigner alerting_dsn_allowed_hosts,
+  # ou supprimer le fichier cible pour ré-adopter.
+  current_host="$(sed -n 's/^SENTRY_DSN=//p' "$target_env" | tail -n 1)"
+  current_host="${current_host#*://}"
+  current_host="${current_host#*@}"
+  current_host="${current_host%%/*}"
+  current_host="${current_host%%:*}"
+  if [ -n "$current_host" ] && [ "$current_host" != "$dsn_host" ]; then
+    fail "changement d'hôte refusé : « $current_host » est en place, le .env propose « $dsn_host ». Renseigner alerting_dsn_allowed_hosts, ou supprimer $target_env pour ré-adopter."
+  fi
+fi
 
 candidate="$target_env.candidate"
 printf 'SENTRY_DSN=%s\n' "$dsn" >"$candidate"

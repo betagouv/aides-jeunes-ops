@@ -71,6 +71,9 @@ alerting_sweep_service_name: alert-systemd-sweep
 # publie leur état.
 # `expect_active: false` pour un service déclenché par un timer : son état
 # normal est « inactive », seul l'échec compte.
+# Le nom doit porter son suffixe systemd. « nginx » tout court poserait le
+# greffon dans /etc/systemd/system/nginx.d, que systemd ne lit pas, et l'unité
+# compterait pour deux au balayage. Une vérification l'impose au déploiement.
 # Ajouter une unité = deux lignes ici, rien d'autre. Une unité en échec que
 # personne n'a pensé à lister est de toute façon remontée par le balayage, qui
 # lit `systemctl --failed` en entier — la liste sert à ce que la simple absence
@@ -102,3 +105,14 @@ alerting_sweep_on_calendar: "*-*-* 08:15:00"
 # échec n'a pas besoin de trente tickets : les premières suffisent à alerter,
 # et le décompte complet part dans le journal.
 alerting_sweep_max_events: 10
+# Hôtes vers lesquels le DSN a le droit de pointer, motifs glob acceptés
+# (« *.ingest.sentry.io »). Le DSN vient d'un fichier que possède l'utilisateur
+# de déploiement : il décide donc où partent les journaux d'unités root que les
+# alertes emportent, et permettrait d'éteindre toute la supervision en la
+# redirigeant vers un puits qui répond 200.
+# Liste vide = épinglage sur premier usage : le premier passage adopte l'hôte
+# trouvé dans le .env, tout changement ultérieur est refusé, et le DSN déjà en
+# place continue de servir. C'est le défaut parce qu'il ne suppose rien de
+# l'hôte réel — il ne peut donc pas couper l'alerte en production le jour du
+# déploiement. Renseigner la liste dès que l'hôte est connu : c'est plus sûr.
+alerting_dsn_allowed_hosts: []

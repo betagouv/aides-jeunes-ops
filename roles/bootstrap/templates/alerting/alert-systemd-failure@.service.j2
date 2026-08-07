@@ -18,6 +18,11 @@ Group=root
 EnvironmentFile=-{{ alerting_env_file }}
 ExecStart={{ alerting_script_path }} %i
 
+# Sans délai de garde, un `Type=oneshot` hérite de `infinity` : une connexion
+# acceptée mais jamais répondue laisserait une instance figée en root pour chaque
+# unité qui tombe. Un seul événement à émettre ici, d'où une borne courte.
+TimeoutStartSec=120
+
 # Le service ne fait que lire l'état de systemd, le journal, et un fichier
 # d'environnement dans /etc. Il n'écrit nulle part.
 ProtectSystem=strict
