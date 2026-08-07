@@ -4,11 +4,21 @@
     envvar_prefix: NODE_ENV=production MONGODB_URL=mongodb://127.0.0.1/db_{{ item.name }}
     env_file_path: "{{ repository_folder }}/.env"
     wrapper_script_path: "/opt/mes-aides/scripts/sentry_wrapper_cron.sh"
+# Les noms servent à la fois à poser les tâches et à les retirer des crontabs
+# hérités : ils sont définis une seule fois pour que les deux ne divergent pas.
+- name: Set cron job names
+  ansible.builtin.set_fact:
+    cron_names:
+      stats: generate stats for {{ item.name }}
+      emails: send initial survey emails for {{ item.name }}
+      sms: send initial survey sms for {{ item.name }}
+      anonymize: anonymize simulation and followup data collections for {{ item.name }}
+      mongo_stats: Execute generate_mongo_stats.sh monthly {{ item.name }}
 - name: Add a cron job for stats generation
   become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
-    name: generate stats for {{ item.name }}
+    name: "{{ cron_names.stats }}"
     minute: "23"
     hour: "2"
     job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} /usr/bin/node ./dist-server/backend/lib/stats)
@@ -16,7 +26,7 @@
   become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
-    name: send initial survey emails for {{ item.name }}
+    name: "{{ cron_names.emails }}"
     minute: "8"
     hour: "4"
     job: >-
@@ -28,7 +38,7 @@
   become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
-    name: send initial survey sms for {{ item.name }}
+    name: "{{ cron_names.sms }}"
     minute: "8"
     hour: "17"
     job: >-
@@ -40,7 +50,7 @@
   become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
-    name: anonymize simulation and followup data collections for {{ item.name }}
+    name: "{{ cron_names.anonymize }}"
     minute: "0"
     hour: "5"
     job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} npm run tools:cleaner)
@@ -48,8 +58,26 @@
   become: true
   become_user: "{{ server_user_name }}"
   ansible.builtin.cron:
-    name: Execute generate_mongo_stats.sh monthly {{ item.name }}
+    name: "{{ cron_names.mongo_stats }}"
     minute: "0"
     hour: "0"
     day: "1"
     job: (cd {{ repository_folder }} && {{ envvar_prefix }} {{ wrapper_script_path }} {{ env_file_path }} npm run tools:generate-mongo-stats)
+# Le crontab d'un ancien utilisateur de déploiement survit au changement de
+# `server_user_name` : personne ne le retire, et il déclenche les mêmes tâches à
+# la même minute que le nouveau. Deux exécutions concurrentes d'un envoi qui
+# sélectionne puis marque ses destinataires sans verrou les servent deux fois.
+- name: Remove the same cron jobs from superseded deployment users
+  become: true
+  ansible.builtin.cron:
+    name: "{{ obsolete_cron.1 }}"
+    user: "{{ obsolete_cron.0 }}"
+    state: absent
+  loop: >-
+    {{ legacy_cron_users
+       | difference([server_user_name])
+       | product(cron_names.values() | list)
+       | list }}
+  loop_control:
+    loop_var: obsolete_cron
+    label: "{{ obsolete_cron.0 }} — {{ obsolete_cron.1 }}"

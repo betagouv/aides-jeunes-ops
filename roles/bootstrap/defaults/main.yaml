@@ -2,6 +2,10 @@
 instance_name: aides-jeunes
 server_user_name: main
 server_user_group: aides_jeunes
+# Utilisateurs ayant porté le déploiement avant `server_user_name`. Leurs
+# crontabs restent en place et rejouent les mêmes tâches : on les vide.
+legacy_cron_users:
+  - debian
 webroot_path: /var/www
 is_default: false
 challenge_proxy: false
