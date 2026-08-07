@@ -43,3 +43,21 @@ mongodb_backup_retention_days: 14
 # d'octets : sans ce seuil, une faute de frappe dans le nom d'une base
 # produirait des sauvegardes vides pendant des mois sans un seul signal.
 mongodb_backup_min_archive_bytes: 4096
+# Complétude du contenu. Le script compte les documents de chaque collection
+# juste avant le dump et confronte ce relevé au compte rendu de mongodump : une
+# collection supprimée pendant que mongodump traite les autres produit une
+# archive intègre et bien formée, mais amputée. Une collection non vide qui
+# ressort à zéro est toujours refusée ; ce taux ne porte que sur le total de la
+# base, pour absorber les suppressions légitimes survenues pendant le dump sans
+# laisser passer une perte de masse. 90 % : `tools:cleaner` efface chaque jour à
+# 05h00, bien après la sauvegarde de 03h30, et les suppressions faites par les
+# usagers pendant les quelques minutes du dump se comptent sur les doigts.
+mongodb_backup_min_document_ratio_percent: 90
+# Filet grossier contre l'effondrement, comparé à la plus grosse archive encore
+# conservée — pas à une constante, qui ne détecte que la base absente.
+# Volontairement large : le contrôle fin est le recomptage des documents
+# ci-dessus, celui-ci ne couvre que ce qui lui échapperait (une base tronquée
+# côté mongod, un disque qui se remplit). Un seuil serré crierait sur les
+# variations légitimes — une campagne d'anonymisation, une purge — et une alerte
+# qui crie pour rien finit ignorée.
+mongodb_backup_min_size_ratio_percent: 50
