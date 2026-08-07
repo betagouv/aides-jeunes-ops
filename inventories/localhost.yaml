@@ -14,6 +14,7 @@ virtualmachines:
       github_users:
         - jenovateurs
         - Shamzic
+        - devthejo
       monitor:
         port: 8887
       applications:
