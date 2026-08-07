@@ -1,0 +1,10 @@
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/alerting/onfailure.conf.j2
+
+# Greffon, et non modification de l'unité elle-même : le même fichier se pose
+# sur une unité de ce dépôt comme sur une unité de distribution (nginx, mongod)
+# sans jamais toucher à sa définition d'origine.
+# `%n` est le nom de l'unité qui tombe ; il devient l'instance du gabarit
+# d'alerte, qui le relit dans `%i`.
+[Unit]
+OnFailure={{ alerting_failure_service_name }}@%n.service
