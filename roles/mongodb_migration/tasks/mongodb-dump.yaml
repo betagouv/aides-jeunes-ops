@@ -1,11 +1,17 @@
 ---
+# Les archives contiennent des simulations et des suivis : données personnelles
+# et financières. Le répertoire est fermé et l'umask du dump l'est aussi, sans
+# quoi tout utilisateur local pourrait les lire le temps du transfert.
 - name: Create MongoDB dump directory
   ansible.builtin.file:
     path: /tmp/mongodump
     state: directory
-    mode: "0755"
+    owner: root
+    group: root
+    mode: "0700"
 - name: Dump MongoDB database with a query
   ansible.builtin.shell: |
+    umask 0077
     mongodump \
       --db db_{{ application.name }} \
       --collection {{ item.key }} \
@@ -14,6 +20,13 @@
       --gzip
   register: dump_result
   changed_when: dump_result.rc == 0
+  with_dict: "{{ application.mongodb_collections_migration }}"
+- name: Restrict MongoDB dump archives to root
+  ansible.builtin.file:
+    path: /tmp/mongodump/{{ application.name }}_{{ item.key }}.gz
+    owner: root
+    group: root
+    mode: "0600"
   with_dict: "{{ application.mongodb_collections_migration }}"
 - name: Fetch MongoDB dump to local machine
   ansible.builtin.fetch:
