@@ -195,7 +195,10 @@ reflected in the record of processing activities.
 A backup that fails silently for a month is the failure mode that actually hurts, and the
 status page itself sat in `failed` for a year without anyone noticing. The `bootstrap` role
 therefore makes a broken unit announce itself, through the Sentry project the cron jobs
-already report to. Nothing to run by hand — `bootstrap.yaml` installs it.
+already report to. `bootstrap.yaml` installs the whole thing, but it needs **one value from
+you**: `alerting_dsn_destination`, in the inventory. Until that is set the units are
+installed and inert, and the play says so with a red task — see
+[the one manual step](#the-one-manual-step) below.
 
 Two triggers, because they catch different things:
 
@@ -368,6 +371,12 @@ sweep at the default cap can take five minutes before failing.
 But a sweep whose timer has been disabled reports nothing at all and says nothing about it;
 the only remaining witness is then the status page, which is why the sweep units are in the
 watched list.
+
+**There is no heartbeat.** Between two deployments nothing exercises the DSN as long as no
+unit fails, so a key revoked on the Sentry side goes unnoticed until the next incident — and
+that incident is then the one that does not arrive. It stays visible locally (unit `failed`,
+status page red), but the push channel is silently gone. A Sentry cron-monitor check-in from
+the daily sweep would close that window; it is not implemented here.
 
 **Nobody is paged.** These events land in Sentry like the cron failures already do, and
 inherit whatever notification rules that project has. If nobody has an alert rule on this

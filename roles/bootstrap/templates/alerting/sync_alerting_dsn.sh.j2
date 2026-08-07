@@ -100,6 +100,19 @@ case "$key" in
     ;;
 esac
 
+# L'alphabet ne borne pas la taille : une clé démesurée passerait ici et ne se
+# verrait qu'à l'émission, en « http status: 431 » puis, au-delà d'environ
+# 131 ko, en « 203/EXEC — Argument list too long ». Bruyant, mais trois tâches
+# trop loin — le message appartient ici. Une clé publique Sentry fait 32
+# caractères, 128 laisse de la marge à tout format à venir.
+# `wc -c` et non la syntaxe bash du cardinal : celle-ci accole une accolade et un
+# dièse, que Jinja lit comme une ouverture de commentaire — le gabarit ne se
+# rendrait alors plus du tout.
+key_length="$(printf '%s' "$key" | wc -c)"
+if [ "$key_length" -gt 128 ]; then
+  fail "la clé publique de SENTRY_CRON_DSN ($source_env) fait $key_length caractères, 128 au plus"
+fi
+
 # Composition, et non recopie : les trois morceaux sont assemblés ici, deux
 # venant du dépôt et un seul du .env.
 dsn="$scheme://$key@$destination"
