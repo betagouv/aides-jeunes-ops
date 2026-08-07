@@ -14,9 +14,35 @@ Group=root
 UMask=0077
 ExecStart={{ mongodb_backup_script_path }}
 
-# Le service n'a besoin d'écrire que dans le répertoire des sauvegardes. Le
-# reste du système lui est en lecture seule : une erreur de configuration ne
-# peut pas déposer d'archive sous /var/www ni dans un dépôt applicatif.
+# PIÈGE : mongosh range sa configuration sous $HOME/.mongodb et, s'il n'y
+# parvient pas, écrit un avertissement sur sa sortie *standard* en sortant
+# malgré tout en 0 — l'avertissement se mêle alors aux données demandées.
+# `ProtectHome` ci-dessous remplace /root par un répertoire vide et
+# inaccessible : sans un HOME accessible, l'inventaire des collections est
+# illisible et *chaque* exécution du service échoue.
+#
+# Ce foyer est un répertoire d'exécution à nous, créé en 0700 root au démarrage
+# et détruit à la fin — et non /tmp, qui n'est privé que tant que `PrivateTmp`
+# est là. Si cette directive sautait un jour pour une raison sans rapport,
+# n'importe quel utilisateur local pourrait poser un lien symbolique à la place
+# du fichier de configuration de mongosh et obtenir une écriture root
+# arbitraire. La sûreté ne doit pas dépendre d'une seconde directive.
+RuntimeDirectory=mongodb-backup
+RuntimeDirectoryMode=0700
+Environment=HOME=/run/mongodb-backup
+
+# `Type=oneshot` n'impose aucun délai de garde. Un mongodump figé sur un socket
+# retiendrait le verrou indéfiniment et empêcherait toutes les sauvegardes
+# suivantes, sans que rien ne passe en `failed`. Une heure : la sauvegarde de
+# production se compte en minutes.
+TimeoutStartSec=3600
+
+# Le service n'a besoin d'écrire que dans le répertoire des sauvegardes ; le
+# reste du système lui est monté en lecture seule.
+# PIÈGE : ReadWritePaths résout les liens symboliques. Si le chemin ci-dessous
+# devenait un lien, systemd ouvrirait sa cible en écriture — /var/www par
+# exemple — sans rien signaler. Le refus est dans le script, qui contrôle que le
+# répertoire de sauvegarde n'est pas un lien.
 ProtectSystem=strict
 ReadWritePaths={{ mongodb_backup_directory }}
 ProtectHome=true

@@ -8,10 +8,15 @@
 # les fichiers statiques) et hors du dépôt ops synchronisé dans /opt/mes-aides.
 # 0700 root:root : les archives contiennent la base complète, données
 # personnelles et financières comprises.
+# follow: false — le confinement systemd de l'unité (ReadWritePaths) résout les
+# liens symboliques : un lien à cet emplacement ferait écrire les archives dans
+# sa cible. Le script refuse ce cas de son côté ; ici on s'assure qu'Ansible ne
+# fabrique ni n'entérine un lien.
 - name: Create MongoDB backup directory
   ansible.builtin.file:
     path: "{{ mongodb_backup_directory }}"
     state: directory
+    follow: false
     owner: root
     group: root
     mode: "0700"
@@ -29,7 +34,6 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Reload systemd
 - name: Setup MongoDB backup timer
   ansible.builtin.template:
     src: templates/mongodb-backup.timer.j2
@@ -37,14 +41,14 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Reload systemd
-# Le gestionnaire de rechargement est différé jusqu'au prochain point de
-# synchronisation : sans ce drapeau, systemd travaillerait sur les anciennes
-# définitions d'unités.
-- name: Reload systemd before enabling the timer
-  ansible.builtin.meta: flush_handlers
+# daemon_reload porté par la tâche elle-même : le module recharge les
+# définitions avant d'agir sur l'unité, sans rapporter de changement pour
+# autant. Un handler serait différé après l'activation du timer, et le forcer
+# par `meta: flush_handlers` viderait toute la file — dont le redémarrage de
+# nginx notifié plus tôt, qui partirait avant l'écriture de ses configurations.
 - name: Enable and start MongoDB backup timer
   ansible.builtin.systemd:
     name: "{{ mongodb_backup_service_name }}.timer"
     enabled: true
     state: started
+    daemon_reload: true

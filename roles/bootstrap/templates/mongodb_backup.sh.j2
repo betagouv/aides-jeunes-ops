@@ -12,6 +12,14 @@
 
 set -euo pipefail
 
+# `[!0-9]`, plus bas, est un intervalle de *collation* et non une classe ASCII :
+# sous une locale UTF-8, les chiffres arabo-indiens, devanagari ou pleine chasse
+# y tombent et franchissent la validation des entiers, pour échouer ensuite dans
+# une comparaison arithmétique qui sort en 2 — un code que `if` lit comme
+# « faux ». La locale C ferme cette porte et rend au passage `sort`, `find` et
+# `awk` déterministes, quelle que soit la configuration de la machine.
+export LC_ALL=C
+
 # Les archives contiennent la base complète : données personnelles et
 # financières. Tout ce que ce script crée n'est lisible que par root.
 umask 0077
@@ -21,6 +29,8 @@ mongo_host="{{ mongodb_backup_host }}"
 mongo_port="{{ mongodb_backup_port }}"
 retention_days="{{ mongodb_backup_retention_days }}"
 min_archive_bytes="{{ mongodb_backup_min_archive_bytes }}"
+min_document_ratio_percent="{{ mongodb_backup_min_document_ratio_percent }}"
+min_size_ratio_percent="{{ mongodb_backup_min_size_ratio_percent }}"
 databases=({% for database in mongodb_backup_databases %}"{{ database }}" {% endfor %})
 
 fail() {
@@ -28,15 +38,43 @@ fail() {
   exit 1
 }
 
-if [ ! -d "$backup_dir" ]; then
-  fail "le répertoire de sauvegarde $backup_dir n'existe pas"
-fi
+# `[ abc -lt 1 ]` sort en code 2, que `if` interprète comme « faux » et que
+# `set -e` ne voit pas dans une condition : une valeur non numérique passerait
+# tous les tests arithmétiques puis ferait mourir le script plus loin — ou pire,
+# le ferait réussir sur une rétention absurde. Le filtrage sur les caractères
+# précède donc toute comparaison.
+#
+# Le zéro initial est refusé plutôt que toléré : `$((030 - 1))` vaut 23, l'octal
+# de bash. La rétention deviendrait silencieusement fausse, sans la moindre
+# erreur — et YAML 1.1 fabrique volontiers un `030` dans un inventaire. Au-delà
+# de 18 chiffres l'entier de bash déborde et les comparaisons se mettent à
+# mentir ; la longueur se contrôle par un motif, la syntaxe bash de la longueur
+# d'une variable accolant une accolade et un dièse que Jinja lit comme une
+# ouverture de commentaire.
+require_integer_in_range() {
+  local name="$1" value="$2" minimum="$3" maximum="$4"
+  case "$value" in
+    '' | *[!0-9]* | 0?*)
+      fail "$name doit être un entier positif sans zéro initial, valeur reçue : « $value »"
+      ;;
+    ???????????????????*)
+      fail "$name dépasse la capacité entière du script, valeur reçue : « $value »"
+      ;;
+  esac
+  if [ "$value" -lt "$minimum" ] || [ "$value" -gt "$maximum" ]; then
+    fail "$name doit être compris entre $minimum et $maximum, valeur reçue : $value"
+  fi
+}
 
-if [ "$retention_days" -lt 1 ]; then
-  fail "rétention invalide ($retention_days jours) : au moins 1 jour est requis"
-fi
+require_integer_in_range "la rétention (en jours)" "$retention_days" 1 3650
+require_integer_in_range "le plancher de taille d'archive (en octets)" "$min_archive_bytes" 1 1099511627776
+require_integer_in_range "le taux minimal de documents sauvegardés (en %)" "$min_document_ratio_percent" 1 100
+require_integer_in_range "le taux minimal de taille d'archive (en %)" "$min_size_ratio_percent" 1 100
 
-for tool in mongodump mongorestore gzip; do
+# mongosh sert à inventorier les collections et leur nombre de documents juste
+# avant le dump : c'est ce qui permet de constater l'amputation d'une
+# collection. Il est installé par le paquet `mongodb-org`, qui en dépend.
+for tool in mongodump mongorestore mongosh gzip flock; do
   command -v "$tool" >/dev/null ||
     fail "$tool est introuvable, impossible de sauvegarder ou de vérifier"
 done
@@ -48,6 +86,39 @@ if [ -z "${databases[*]}" ]; then
   fail "aucune base à sauvegarder : mongodb_backup_databases est vide"
 fi
 
+# `ReadWritePaths` de l'unité systemd résout les liens symboliques : si
+# $backup_dir en devenait un, le confinement autoriserait l'écriture dans sa
+# cible — /var/www par exemple — sans rien signaler. Le refus est ici.
+if [ -L "$backup_dir" ]; then
+  fail "le répertoire de sauvegarde $backup_dir est un lien symbolique : refus d'écrire des archives ailleurs que dans un vrai répertoire dédié"
+fi
+
+# Sous systemd ce test ne peut pas échouer : `ReadWritePaths` exige que le
+# chemin existe et l'unité meurt en 226/NAMESPACE avant même l'ExecStart. Il ne
+# sert qu'aux lancements directs du script, hors unité.
+if [ ! -d "$backup_dir" ]; then
+  fail "le répertoire de sauvegarde $backup_dir n'existe pas"
+fi
+
+# systemd refuse de démarrer deux fois la même unité, mais rien n'empêche un
+# lancement manuel pendant la fenêtre du timer. Sans verrou, le balayage des
+# fichiers de travail au début d'une exécution détruit le dump en cours de
+# l'autre, voire son archive déjà vérifiée. Le fichier de verrou est caché, et
+# les balayages comme la rotation ne retiennent que des noms en `.archive.gz` :
+# ni le verrou ni le journal de dump ne peuvent être ramassés.
+exec {backup_lock}>"$backup_dir/.lock"
+flock --nonblock "$backup_lock" ||
+  fail "une sauvegarde est déjà en cours (verrou $backup_dir/.lock) : cette exécution s'arrête sans rien modifier"
+
+# Journal de mongodump, relu pour recompter les documents effectivement écrits.
+# Caché lui aussi, et supprimé quoi qu'il arrive.
+dump_report="$backup_dir/.mongodb-backup.report"
+trap 'rm -f "$dump_report"' EXIT
+
+# LIMITE CONNUE : à la seconde près. Deux exécutions lancées dans la même
+# seconde publieraient le même nom et la seconde écraserait la première par son
+# `mv`. Hors de portée du timer, qui déclenche une fois par jour, et le verrou
+# ci-dessus sérialise de toute façon les lancements manuels.
 timestamp="$(date +%Y%m%dT%H%M%S)"
 
 # Un arrêt brutal pendant un dump laisse un fichier de travail que rien ne
@@ -65,24 +136,158 @@ for database in "${databases[@]}"; do
 
   printf 'Sauvegarde de %s depuis %s:%s\n' "$database" "$mongo_host" "$mongo_port"
 
+  # Inventaire de référence, pris juste avant le dump : nom de chaque collection
+  # et nombre exact de documents. C'est la seule mesure prise hors de mongodump,
+  # donc la seule capable de contredire ce qu'il annonce. `countDocuments` sur
+  # un filtre vide se résout par un parcours d'index sur _id, négligeable devant
+  # la lecture intégrale que mongodump fait juste après.
+  #
+  # PORTÉE : `type: "collection"` écarte les vues et les collections
+  # temporelles, que mongodump sauvegarde sous `system.buckets.*` — elles sont
+  # bien archivées, mais hors du recomptage. Aucune dans les bases sauvegardées
+  # à ce jour ; le jour où il y en aura, ce contrôle sera à étendre.
+  if ! inventory="$(mongosh \
+    --host "$mongo_host" \
+    --port "$mongo_port" \
+    --quiet \
+    "$database" \
+    --eval '
+      db.getCollectionInfos({ type: "collection" })
+        .map(function (info) { return info.name })
+        .filter(function (name) { return name.indexOf("system.") !== 0 })
+        .sort()
+        .forEach(function (name) {
+          print(name + "\t" + db.getCollection(name).countDocuments({}))
+        })
+    ')"; then
+    fail "impossible d'inventorier les collections de $database sur $mongo_host:$mongo_port (cause ci-dessus)"
+  fi
+
+  if [ -z "$inventory" ]; then
+    fail "$database ne contient aucune collection sur $mongo_host:$mongo_port : base inexistante ou mal nommée ?"
+  fi
+
   # Aucun identifiant sur la ligne de commande : mongod n'écoute que sur la
   # boucle locale et n'a pas d'authentification. Ajouter --username/--password
   # ici les exposerait dans `ps` et dans le journal — passer par --config si
   # l'authentification est un jour activée.
-  if ! mongodump \
+  #
+  # Le compte rendu de mongodump — une ligne par collection, avec le nombre de
+  # documents écrits — arrive sur la sortie d'erreur. Il est détourné vers un
+  # fichier pour être relu plus bas, puis recopié tel quel dans le journal du
+  # service.
+  dump_status=0
+  mongodump \
     --host="$mongo_host" \
     --port="$mongo_port" \
     --db="$database" \
     --gzip \
-    --archive="$partial"; then
+    --archive="$partial" \
+    2>"$dump_report" || dump_status=$?
+  cat "$dump_report" >&2
+  if [ "$dump_status" -ne 0 ]; then
     rm -f "$partial"
-    fail "mongodump a échoué pour $database sur $mongo_host:$mongo_port (cause ci-dessus)"
+    fail "mongodump a échoué pour $database sur $mongo_host:$mongo_port (code $dump_status, cause ci-dessus)"
   fi
 
   size="$(stat --format=%s "$partial")"
   if [ "$size" -lt "$min_archive_bytes" ]; then
     rm -f "$partial"
     fail "archive de $database anormalement petite ($size octets, plancher $min_archive_bytes) : base vide, inexistante ou mal nommée ?"
+  fi
+
+  # Filet grossier contre l'effondrement : la plus grosse archive de la fenêtre
+  # de rétention sert de référence. Volontairement large — le contrôle fin est
+  # le recomptage des documents ci-dessous ; ce seuil-ci n'est là que pour ce
+  # qui lui échapperait, et ne doit jamais crier sur une variation légitime.
+  #
+  # `-mtime` borne la fenêtre, et cette borne est essentielle : la rotation
+  # n'ayant lieu qu'après un succès, une référence anormalement grosse se
+  # perpétuerait toute seule — elle fait échouer, l'échec empêche la rotation,
+  # l'absence de rotation la préserve. Ainsi bornée, elle sort de la comparaison
+  # au plus tard au bout de $retention_days jours.
+  #
+  # Le prix de ce bornage : après une interruption plus longue que la rétention,
+  # plus aucune référence, donc plus de filet — au moment précis où l'on en
+  # aurait le plus besoin. Le contournement est donc annoncé, jamais silencieux.
+  reference_size="$(find "$backup_dir" -maxdepth 1 -type f -name "$database-*.archive.gz" -mtime "-$retention_days" -printf '%s\n' | sort -n | tail -1)"
+  if [ -z "$reference_size" ]; then
+    printf 'Aucune archive de référence de %s dans la fenêtre de %s jours : contrôle de taille relatif ignoré\n' \
+      "$database" "$retention_days"
+  elif [ "$((size * 100))" -lt "$((reference_size * min_size_ratio_percent))" ]; then
+    rm -f "$partial"
+    fail "archive de $database à $size octets contre $reference_size pour la plus grosse archive de la fenêtre (moins de $min_size_ratio_percent %) : dump probablement amputé"
+  fi
+
+  # PIÈGE : ni `gzip --test` ni `mongorestore --dryRun` ne disent quoi que ce
+  # soit du *contenu*. Une collection supprimée pendant que mongodump traite les
+  # autres produit une archive intègre, bien formée, et amputée : mongodump
+  # annonce « 0 documents » pour cette collection et sort en 0. Seule la
+  # confrontation à l'inventaire pris avant le dump le révèle.
+  unset dumped_documents
+  declare -A dumped_documents=()
+  while IFS=$'\t' read -r namespace count; do
+    collection="${namespace#"$database."}"
+    dumped_documents["$collection"]="$count"
+  done < <(awk '
+    /done dumping / {
+      entry = $0
+      sub(/^.*done dumping /, "", entry)
+      gsub(/`/, "", entry)
+      if (match(entry, /\([0-9]+ documents?\)[ \t]*$/)) {
+        namespace = substr(entry, 1, RSTART - 1)
+        sub(/[ \t]+$/, "", namespace)
+        count = substr(entry, RSTART + 1)
+        sub(/[^0-9].*$/, "", count)
+        print namespace "\t" count
+      }
+    }
+  ' "$dump_report")
+
+  anomalies=""
+  expected_total=0
+  dumped_total=0
+  while IFS=$'\t' read -r collection expected; do
+    [ -n "$collection" ] || continue
+    # L'inventaire ne doit rien contenir d'autre que « collection<TAB>nombre ».
+    # Une ligne mal formée signifie que mongosh a mêlé un message à sa sortie —
+    # avertissement d'obsolescence, plainte TLS, refus d'écrire sa configuration
+    # — et non qu'une collection manque. Sans ce contrôle, le message serait pris
+    # pour un nom de collection et le script accuserait la sauvegarde d'être
+    # incomplète : un échec bruyant, mais qui désigne le mauvais coupable.
+    case "$expected" in
+      '' | *[!0-9]*)
+        fail "ligne d'inventaire illisible pour $database : « $collection / $expected » — mongosh a écrit un message parmi ses résultats, ou une collection porte une tabulation dans son nom"
+        ;;
+    esac
+    expected_total="$((expected_total + expected))"
+    dumped="${dumped_documents[$collection]-}"
+    if [ -z "$dumped" ]; then
+      anomalies="$anomalies"$'\n'"  - $collection : absente de l'archive alors qu'elle contenait $expected documents"
+      continue
+    fi
+    dumped_total="$((dumped_total + dumped))"
+    # Tolérance zéro sur une collection vidée : elle rejetterait aussi une petite
+    # collection légitimement vidée pendant le dump. Le cas ne se présente pas
+    # ici — `tools:cleaner` modifie les documents en place et n'en supprime
+    # aucun —, et refuser une archive de trop vaut mieux qu'en garder une amputée.
+    if [ "$expected" -gt 0 ] && [ "$dumped" -eq 0 ]; then
+      anomalies="$anomalies"$'\n'"  - $collection : $expected documents avant le dump, aucun dans l'archive"
+    fi
+  done <<<"$inventory"
+
+  # Comparaison globale plutôt que collection par collection : les suppressions
+  # légitimes pendant le dump touchent quelques documents, noyés dans le total,
+  # alors qu'une perte massive s'y voit. Un total sauvegardé supérieur à
+  # l'inventaire est normal — des documents ont été créés pendant le dump.
+  if [ "$expected_total" -gt 0 ] &&
+    [ "$((dumped_total * 100))" -lt "$((expected_total * min_document_ratio_percent))" ]; then
+    anomalies="$anomalies"$'\n'"  - $dumped_total documents sauvegardés pour $expected_total comptés avant le dump (moins de $min_document_ratio_percent %)"
+  fi
+
+  if [ -n "$anomalies" ]; then
+    rm -f "$partial"
+    fail "l'archive de $database est incomplète, elle a été supprimée plutôt que conservée :$anomalies"
   fi
 
   # Relit l'archive entière et contrôle les sommes CRC et les longueurs de
@@ -111,11 +316,17 @@ for database in "${databases[@]}"; do
   fi
 
   mv "$partial" "$final"
-  printf 'Archive vérifiée : %s (%s octets)\n' "$final" "$size"
+  printf 'Archive vérifiée : %s (%s octets, %s documents sur %s inventoriés)\n' \
+    "$final" "$size" "$dumped_total" "$expected_total"
 done
 
 # La rotation n'a lieu qu'après une sauvegarde réussie : une série d'échecs ne
 # doit jamais consommer les archives encore valides.
+#
+# LIMITE CONNUE : `-mtime` compare à l'heure courante, et une archive dont la
+# date de modification est dans le futur — horloge déréglée, restauration
+# maladroite — n'est jamais retenue. Elle survivrait à la rétention sans un mot,
+# ce qui est d'abord un problème RGPD : ces archives ne sont pas anonymisées.
 printf 'Rotation : suppression des archives de plus de %s jours\n' "$retention_days"
 find "$backup_dir" \
   -maxdepth 1 \
