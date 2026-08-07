@@ -38,17 +38,23 @@ http {
   # server_names_hash_bucket_size ci-dessus : sans ça nginx refuse de démarrer.
   map_hash_bucket_size 128;
 
-  map $host $simulation_app {
-    # Un hôte inconnu ne doit pas produire une clé vide, qui désactiverait
-    # silencieusement le comptage.
-    default "unknown";
+{% set default_application = (applications | selectattr('default_site', 'defined') | selectattr('default_site') | list | first) | default(applications | first) %}
+{% set host_pairs = [] %}
 {% for application in applications %}
-    {{ application.domain }} "{{ application.name }}";
-    openfisca.{{ application.domain }} "{{ application.name }}";
+  {% set _ = host_pairs.append((application.domain, application.name)) %}
+  {% set _ = host_pairs.append(('openfisca.' + application.domain, application.name)) %}
   {% if application.default_site | default(false) and fullname is defined %}
-    {{ fullname }} "{{ application.name }}";
-    openfisca.{{ fullname }} "{{ application.name }}";
+    {% set _ = host_pairs.append((fullname, application.name)) %}
+    {% set _ = host_pairs.append(('openfisca.' + fullname, application.name)) %}
   {% endif %}
+{% endfor %}
+  map $host $simulation_app {
+    # Un hôte inconnu rejoint le budget de l'application par défaut : c'est elle
+    # qu'un `default_server` sert. Une clé propre lui donnerait un budget
+    # supplémentaire, une clé vide désactiverait le comptage.
+    default "{{ default_application.name }}";
+{% for host, name in host_pairs | unique(attribute=0) %}
+    {{ host }} "{{ name }}";
 {% endfor %}
   }
 

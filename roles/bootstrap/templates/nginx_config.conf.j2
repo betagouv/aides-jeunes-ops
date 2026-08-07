@@ -37,7 +37,7 @@
    par IP volontairement large : les mobiles partagent les IP de sortie CGNAT
    des opérateurs, une limite serrée pénaliserait des utilisateurs légitimes. #}
 {% macro compute_limits_section() -%}
-    limit_conn simulation_concurrency {{ simulation_max_concurrency | default((item.openfisca_worker_number | default(3)) * 3) }};
+    limit_conn simulation_concurrency {{ simulation_max_concurrency | default((item.openfisca_worker_number | default(3) | int) * 3) }};
     limit_req  zone=simulation_per_ip burst=60 nodelay;
 
     # Le client Node abandonne à 25 s : au-delà, plus personne n'attend.
@@ -164,12 +164,14 @@ server {
   }
 
   # Seules ces routes déclenchent un calcul OpenFisca : résultats, réponse et
-  # trace brutes, export téléservice, et les paramètres du moteur. Les autres
-  # routes /api/simulation ne coûtent qu'un accès Mongo et ne doivent pas
-  # consommer un budget dimensionné sur les workers gunicorn.
+  # trace brutes, enregistrement du suivi — c'est la fin de l'entonnoir, un
+  # usager qui prend un 503 sur les résultats y bascule —, rendu des emails,
+  # export téléservice, et paramètres du moteur. Les autres routes
+  # /api/simulation ne coûtent qu'un accès Mongo et ne doivent pas consommer un
+  # budget dimensionné sur les workers gunicorn.
   # Insensible à la casse : nginx compare des octets, Express route sans tenir
   # compte de la casse. Un `/API/` suffirait sinon à passer à côté du plafond.
-  location ~* ^/api/(openfisca/|simulation/via/|simulation/[^/]+/(results|openfisca-)) {
+  location ~* ^/api/(openfisca/|email/followups/|simulation/via/|simulation/[^/]+/(results|followup|openfisca-)) {
     {{ compute_limits_section() }}
 
     {{ proxy_section('http://' + upstream_name ) }}
