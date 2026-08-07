@@ -26,6 +26,54 @@ http {
   default_type application/octet-stream;
 
   ##
+  # Rate Limiting
+  ##
+
+  # Une application est servie sous plusieurs noms d'hôte — son domaine, le nom
+  # complet du serveur pour le site par défaut, et le sous-domaine openfisca —
+  # qui partagent tous le même pool gunicorn. La clé du plafond doit donc être
+  # l'application, pas le vhost, sinon le budget est multiplié par autant de
+  # noms. Prod et preprod gardent des budgets distincts, leurs pools le sont.
+  # Les noms d'hôte dépassent le godet par défaut de 64 octets, comme pour
+  # server_names_hash_bucket_size ci-dessus : sans ça nginx refuse de démarrer.
+  map_hash_bucket_size 128;
+
+{% set default_application = (applications | selectattr('default_site', 'defined') | selectattr('default_site') | list | first) | default(applications | first) %}
+{% set host_pairs = [] %}
+{% for application in applications %}
+  {% set _ = host_pairs.append((application.domain, application.name)) %}
+  {% set _ = host_pairs.append(('openfisca.' + application.domain, application.name)) %}
+  {% if application.default_site | default(false) and fullname is defined %}
+    {% set _ = host_pairs.append((fullname, application.name)) %}
+    {% set _ = host_pairs.append(('openfisca.' + fullname, application.name)) %}
+  {% endif %}
+{% endfor %}
+  map $host $simulation_app {
+    # Tout `$host` absent de cette table — balayage par adresse IP, en-tête
+    # forgé, sous-domaine inconnu — retombe ici. Aucun `default_server` n'est
+    # déclaré en production : nginx sert alors le premier vhost du port, et ce
+    # trafic doit rejoindre le budget de l'application par défaut plutôt que
+    # d'obtenir un budget propre, qui s'ajouterait au sien, ou une clé vide,
+    # qui désactiverait le comptage.
+    default "{{ default_application.name }}";
+{% for host, name in host_pairs | unique(attribute=0) %}
+    {{ host }} "{{ name }}";
+{% endfor %}
+  }
+
+  # Plafond global de requêtes simultanées sur les routes qui déclenchent un
+  # calcul OpenFisca. Au-delà, nginx répond 503 immédiatement au lieu de
+  # laisser la file grossir jusqu'au 504.
+  limit_conn_zone $simulation_app zone=simulation_concurrency:1m;
+  limit_conn_status 503;
+
+  # Garde-fou par IP contre un client qui martèle. Volontairement large : les
+  # mobiles partagent les IP de sortie CGNAT des opérateurs, une limite serrée
+  # pénaliserait des utilisateurs légitimes.
+  limit_req_zone $binary_remote_addr zone=simulation_per_ip:10m rate=300r/m;
+  limit_req_status 429;
+
+  ##
   # SSL Settings
   ##
 
