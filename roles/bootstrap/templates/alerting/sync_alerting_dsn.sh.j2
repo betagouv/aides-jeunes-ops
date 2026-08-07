@@ -37,21 +37,44 @@ dsn="$(
     "$source_env" | tail -n 1
 )"
 
-# Retrait du retour chariot d'un fichier édité sous Windows, puis des
-# guillemets éventuels autour de la valeur.
-dsn="${dsn%$'\r'}"
-dsn="${dsn%\"}"
-dsn="${dsn#\"}"
-dsn="${dsn%\'}"
-dsn="${dsn#\'}"
+trim() {
+  printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
 
-# Contrôle de forme, sans jamais afficher la valeur : un DSN Sentry est une URL.
-# Sans ce contrôle, une ligne commentée ou une valeur vide produirait un fichier
-# d'alerte syntaxiquement correct dont le seul effet serait de faire échouer
-# chaque alerte, au moment précis où on en a besoin.
+# ORDRE IMPORTANT : les espaces de fin d'abord, les guillemets ensuite, puis de
+# nouveau les espaces qui étaient à l'intérieur des guillemets. Retirer les
+# guillemets en premier laisse le guillemet fermant collé à la valeur dès que la
+# ligne du .env se termine par une espace — invisible à la lecture, et le
+# fichier produit désarmerait alors chaque alerte sans que rien ne le signale.
+dsn="$(trim "$dsn")"
 case "$dsn" in
-  https://*@*/* | http://*@*/*) ;;
+  \"*\")
+    dsn="${dsn%\"}"
+    dsn="${dsn#\"}"
+    ;;
+  \'*\')
+    dsn="${dsn%\'}"
+    dsn="${dsn#\'}"
+    ;;
+esac
+dsn="$(trim "$dsn")"
+
+# Contrôle de jeu de caractères et de forme, sans jamais afficher la valeur.
+# Le jeu de caractères est le contrôle qui compte, et il est délibérément une
+# liste blanche : cette valeur finit dans un fichier que lisent des unités
+# tournant en root. Un `$(…)`, un accent grave, une espace ou un guillemet
+# rescapé n'y ont rien à faire — les refuser ici ferme la voie par laquelle le
+# propriétaire du .env, qui n'est pas root, pousserait du contenu de son choix
+# vers un contexte root.
+# Une valeur vide est refusée pour une autre raison : elle produirait un fichier
+# syntaxiquement correct dont le seul effet serait de faire échouer chaque
+# alerte, au moment précis où on en a besoin.
+case "$dsn" in
   "") fail "SENTRY_CRON_DSN est absent ou vide dans $source_env" ;;
+  *[!A-Za-z0-9:/@._~%?=-]*)
+    fail "SENTRY_CRON_DSN de $source_env contient un caractère interdit"
+    ;;
+  https://*@*/* | http://*@*/*) ;;
   *) fail "SENTRY_CRON_DSN de $source_env n'a pas la forme d'un DSN Sentry" ;;
 esac
 

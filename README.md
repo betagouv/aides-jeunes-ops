@@ -206,14 +206,22 @@ Two triggers, because they catch different things:
 
 Both run the same script, `/usr/local/sbin/alert_systemd_failure.sh`, which sends one Sentry
 event per unit with a fingerprint of `systemd-unit-failure` + the unit name — so a unit gets
-one Sentry issue, not one per day, and closing it means the panne is handled. The last 50
-journal lines of the unit ride along as breadcrumbs, so the alert says *why* without needing
-an SSH session.
+one Sentry issue, not one per day, and closing it means the failure is handled.
 
 The sweep reads `systemctl --failed` in full, not just the list below: a failed unit nobody
 thought to declare — an `*_openfisca` service, something added later — is still reported. The
 list exists for the other half of the job, checking that a unit which should be running
-actually is, which no global query can guess.
+actually is, which no global query can guess. Declared units are examined **first**, before
+the global list, and the event cap only bites on what is left: `systemctl` answers in
+alphabetical order, so a burst of unrelated failures would otherwise eat the whole budget
+before ever reaching `nginx`.
+
+Only **declared** units ship their last 50 journal lines as breadcrumbs, so the alert says
+*why* without needing an SSH session. Anything else is reported without its journal: the
+sweep also covers application and `*_openfisca` services, whose logs can carry personal and
+financial data that has no business being exported to Sentry. **Adding a unit to
+`alerting_watched_units` is therefore also a decision to send its journal to Sentry** — worth
+a thought for anything that handles user data.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -227,9 +235,8 @@ publishes the state of these units next to its URL probes.
 #### Where the DSN comes from
 
 The alerting units run as `root`, and a root unit has no business reading an application
-`.env` — that file belongs to the deployment user, so anyone who can write it could inject
-code into a root shell, and it carries every other application secret. The units are hardened
-with `ProtectHome=true` and could not read it anyway.
+`.env` — that file belongs to the deployment user, and it carries every other application
+secret. The units are hardened with `ProtectHome=true` and could not read it anyway.
 
 So ansible, during `bootstrap.yaml`, extracts the single `SENTRY_CRON_DSN` line from the
 default application's `.env` and writes it to `/etc/aides-jeunes/alerting.env`, `0600
@@ -245,9 +252,37 @@ the play without a vault password file on the server — that is, the same serve
 with more machinery. `bootstrap.yaml` replays on every merge to `main`, so rotating
 `SENTRY_CRON_DSN` in the `.env` propagates on the next deployment.
 
-If the `.env` is not there yet — a brand new machine — the play prints a warning and carries
-on, and the alerting scripts exit non-zero with an explicit message rather than pretending to
-send anything.
+The value crosses a privilege boundary — it comes from a file the deployment user owns and
+ends up in a file that root-owned units read — so it is treated as untrusted input at every
+step:
+
+- **it is validated against a character whitelist** (`A-Za-z0-9:/@._~%?=-`) before being
+  written. A `$(…)`, a backtick, a quote or a space is refused outright, with a message that
+  never prints the value;
+- **no script ever `source`s it.** `sync_alerting_dsn.sh` reads the `.env` with `sed`, and
+  `alert_systemd_failure.sh` reads `alerting.env` the same way;
+- **the units get it through `EnvironmentFile=`**, which systemd parses itself, with no shell
+  in the path.
+
+Any one of those would do; all three are there because a shell substitution reaching a root
+unit is not a bug you want to discover in production.
+
+If the `.env` is not there yet — a brand new machine — or if the DSN is malformed, the play
+prints a warning and carries on rather than blocking the application deployment, and the
+alerting scripts exit non-zero with an explicit message rather than pretending to send
+anything.
+
+#### The self-test
+
+An alerting chain that installs "all green" on a machine where nothing will ever be sent
+reproduces exactly the silence it exists to break. So at the end of the role, ansible runs
+`alert_systemd_failure.sh --self-test`, which sends a real `info` event and fails loudly if
+it cannot. The play warns; it does not abort.
+
+It does not run on every deployment — one Sentry event per deployment would reopen a ticket
+each time — but it does run whenever something changed, or whenever `alerting.env` is
+missing, which covers every case where the chain can be broken without anyone knowing. The
+event carries the `systemd-alerting-self-test` fingerprint, so it stays in a single issue.
 
 #### Checking that it works
 
@@ -257,6 +292,7 @@ systemctl start alert-systemd-sweep.service       # run it now
 journalctl -u alert-systemd-sweep.service         # what it found, and whether it could report
 systemctl list-units --failed                     # the same question, without Sentry
 curl -s https://monitor.<fullname> | jq .units    # unit states on the status page
+alert_systemd_failure.sh --self-test              # send one event and check it leaves
 ```
 
 #### Limits you need to know about
@@ -282,6 +318,16 @@ and it is not done here.
 
 **Removing a unit from `alerting_watched_units` leaves its drop-in behind.** Ansible writes
 `/etc/systemd/system/<unit>.d/50-onfailure.conf` and never removes it; delete it by hand.
+
+**The status page still queries systemd synchronously.** One `systemctl show` covers every
+unit, capped at two seconds, so a systemd that stops answering costs the page two seconds
+instead of hanging it — but requests are still served one after another while that call runs.
+Making the page fully asynchronous is a bigger change than this needed.
+
+**The source `.env` is world-readable** (`0644` in a `0755` directory), so the DSN — and
+every other application secret in it — is already readable by any local user. That predates
+this mechanism and is not fixed here; `chmod 0600` on the application `.env` would close it,
+and the alerting keeps working either way since it reads the file as root.
 
 **The status page reads unit states over the D-Bus system bus.** `monitor_service` runs as
 the deployment user, and an unprivileged `systemctl show` needs `/run/dbus/system_bus_socket`

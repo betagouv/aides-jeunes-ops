@@ -9,6 +9,13 @@ Documentation=https://github.com/betagouv/aides-jeunes-ops
 Type=oneshot
 User=root
 Group=root
+# Le DSN entre par systemd, qui analyse ce fichier lui-même : aucune évaluation
+# par un interpréteur de commandes, donc rien à substituer pour qui aurait
+# glissé un `$(…)` dans le .env dont ce fichier dérive.
+# Le préfixe « - » rend le fichier facultatif : absent, c'est le script qui le
+# dit avec un message exploitable, plutôt qu'un « Failed to load environment
+# files » de systemd. L'unité tombe en échec dans les deux cas.
+EnvironmentFile=-{{ alerting_env_file }}
 ExecStart={{ alerting_script_path }} %i
 
 # Le service ne fait que lire l'état de systemd, le journal, et un fichier

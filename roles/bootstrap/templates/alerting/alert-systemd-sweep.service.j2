@@ -6,6 +6,9 @@ Documentation=https://github.com/betagouv/aides-jeunes-ops
 Type=oneshot
 User=root
 Group=root
+# Voir alert-systemd-failure@.service.j2 : systemd analyse ce fichier lui-même,
+# sans interpréteur de commandes.
+EnvironmentFile=-{{ alerting_env_file }}
 ExecStart={{ alerting_script_path }} --sweep
 
 ProtectSystem=strict

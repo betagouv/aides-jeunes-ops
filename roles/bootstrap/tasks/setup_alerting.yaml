@@ -8,9 +8,24 @@
     # Le DSN d'alerte est déjà sur la machine, dans le .env de l'application par
     # défaut : c'est celui qu'utilisent les tâches cron. On le reprend là plutôt
     # que d'en introduire un second à gérer et à faire tourner.
+    alerting_dsn_applications: >-
+      {{ applications | selectattr('default_site', 'defined')
+         | selectattr('default_site') | map(attribute='name') | list }}
+# Chaîne vide plutôt que `| first` sur une séquence potentiellement vide, qui
+# rendrait « No first item, sequence was empty » à mi-parcours du bootstrap sans
+# dire de quoi il s'agit.
+- name: Set the alerting DSN source
+  ansible.builtin.set_fact:
     alerting_dsn_source: >-
-      /home/{{ server_user_name }}/{{ applications | selectattr('default_site', 'defined')
-      | selectattr('default_site') | map(attribute='name') | first }}/repository/.env
+      {{ ('/home/' ~ server_user_name ~ '/' ~ alerting_dsn_applications[0] ~ '/repository/.env')
+         if (alerting_dsn_applications | length == 1) else '' }}
+- name: Report an inventory without exactly one default application
+  when: alerting_dsn_applications | length != 1
+  ansible.builtin.debug:
+    msg: >-
+      [WARNING] L'inventaire déclare {{ alerting_dsn_applications | length }} application(s)
+      avec `default_site: true` ; il en faut exactement une pour savoir où lire
+      SENTRY_CRON_DSN. Les unités d'alerte sont installées mais resteront muettes.
 - name: Create alerting configuration directory
   ansible.builtin.file:
     path: "{{ alerting_directory }}"
@@ -19,6 +34,7 @@
     group: root
     mode: "0700"
 - name: Install alerting DSN synchronisation script
+  when: alerting_dsn_source | length > 0
   ansible.builtin.template:
     src: templates/alerting/sync_alerting_dsn.sh.j2
     dest: "{{ alerting_dsn_sync_script_path }}"
@@ -26,25 +42,28 @@
     group: root
     mode: "0700"
 # Le .env applicatif n'est pas produit par ce dépôt : il est déposé à la main
-# sur le serveur. Sur une machine neuve il n'existe pas encore, et l'alerte doit
-# le dire au lieu de faire échouer tout le bootstrap.
-- name: Check that the application environment file exists
-  ansible.builtin.stat:
-    path: "{{ alerting_dsn_source }}"
-  register: alerting_dsn_source_stat
+# sur le serveur. Sur une machine neuve il n'existe pas encore.
+# `failed_when: false` : une configuration d'alerte incomplète ne doit pas
+# interrompre le déploiement de l'application — le mécanisme censé signaler les
+# pannes serait alors lui-même une panne. L'échec n'est pas avalé pour autant :
+# il est rapporté juste en dessous, et l'auto-contrôle de fin de rôle le redit.
 - name: Copy the Sentry DSN into the alerting environment file
-  when: alerting_dsn_source_stat.stat.exists
+  when: alerting_dsn_source | length > 0
   ansible.builtin.command:
     cmd: "{{ alerting_dsn_sync_script_path }}"
   register: alerting_dsn_sync
   changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
-- name: Report a missing DSN source
-  when: not alerting_dsn_source_stat.stat.exists
+  failed_when: false
+- name: Report a DSN that could not be copied
+  when:
+    - alerting_dsn_source | length > 0
+    - alerting_dsn_sync.rc != 0
   ansible.builtin.debug:
     msg: >-
-      [WARNING] {{ alerting_dsn_source }} est absent : SENTRY_CRON_DSN n'a pas pu être
-      recopié dans {{ alerting_env_file }}. Les unités d'alerte échoueront bruyamment
-      tant que ce fichier n'existe pas. Le déposer puis rejouer bootstrap.yaml.
+      [WARNING] SENTRY_CRON_DSN n'a pas pu être recopié dans {{ alerting_env_file }} :
+      {{ alerting_dsn_sync.stderr | default('') }}
+      Les unités d'alerte échoueront bruyamment tant que ce sera le cas.
+      Corriger {{ alerting_dsn_source }} puis rejouer bootstrap.yaml.
 - name: Install systemd failure alerting script
   ansible.builtin.template:
     src: templates/alerting/alert_systemd_failure.sh.j2
@@ -52,6 +71,7 @@
     owner: root
     group: root
     mode: "0700"
+  register: alerting_script
 - name: Setup systemd failure alerting service template
   ansible.builtin.template:
     src: templates/alerting/alert-systemd-failure@.service.j2
@@ -59,6 +79,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: alerting_failure_unit
   notify: Reload systemd
 - name: Setup systemd sweep service
   ansible.builtin.template:
@@ -67,6 +88,7 @@
     owner: root
     group: root
     mode: "0644"
+  register: alerting_sweep_unit
   notify: Reload systemd
 - name: Setup systemd sweep timer
   ansible.builtin.template:
@@ -109,3 +131,34 @@
     name: "{{ alerting_sweep_service_name }}.timer"
     enabled: true
     state: started
+# Une chaîne d'alerte qui s'installe « tout vert » sur une machine où rien ne
+# partira jamais reproduit exactement le silence qu'elle est censée casser. Le
+# seul contrôle qui vaille est d'émettre réellement un événement et de regarder
+# s'il part.
+# Il ne tourne pas à chaque déploiement — un événement Sentry par déploiement
+# rouvrirait un ticket à chaque fois — mais dès que quelque chose a bougé, ou
+# quand le fichier d'environnement manque, c'est-à-dire dans tous les cas où la
+# chaîne peut être cassée sans qu'on le sache.
+- name: Check whether the alerting environment file is in place
+  ansible.builtin.stat:
+    path: "{{ alerting_env_file }}"
+  register: alerting_env_file_stat
+- name: Verify that an alert can actually reach Sentry
+  when: >-
+    not alerting_env_file_stat.stat.exists
+    or (alerting_dsn_sync is defined and alerting_dsn_sync is changed)
+    or alerting_script is changed
+    or alerting_failure_unit is changed
+    or alerting_sweep_unit is changed
+  ansible.builtin.command:
+    cmd: "{{ alerting_script_path }} --self-test"
+  register: alerting_self_test
+  changed_when: false
+  failed_when: false
+- name: Report an alerting chain that cannot reach Sentry
+  when: alerting_self_test.rc | default(0) != 0
+  ansible.builtin.debug:
+    msg: >-
+      [WARNING] L'auto-contrôle a échoué : aucun événement n'a pu être émis vers Sentry.
+      {{ alerting_self_test.stderr | default('') }}
+      Les unités systemd en échec ne seront signalées à personne tant que ce sera le cas.
