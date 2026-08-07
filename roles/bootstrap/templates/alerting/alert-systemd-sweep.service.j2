@@ -1,0 +1,22 @@
+[Unit]
+Description=Balayage de l'état des unités systemd de {{ instance_name }}
+Documentation=https://github.com/betagouv/aides-jeunes-ops
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart={{ alerting_script_path }} --sweep
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# Pas de section [Install] : ce service est déclenché par son timer, et par lui
+# seul. Un `WantedBy=multi-user.target` lancerait un balayage à chaque
+# démarrage, au moment où la moitié des unités sont encore en cours de
+# démarrage.

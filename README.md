@@ -190,6 +190,111 @@ ability and data minimisation — it is the team's and the DPO's call, not a tec
 default, and `mongodb_backup_retention_days` is the knob. Whatever value is chosen should be
 reflected in the record of processing activities.
 
+### Alerting on failed systemd units
+
+A backup that fails silently for a month is the failure mode that actually hurts, and the
+status page itself sat in `failed` for a year without anyone noticing. The `bootstrap` role
+therefore makes a broken unit announce itself, through the Sentry project the cron jobs
+already report to. Nothing to run by hand — `bootstrap.yaml` installs it.
+
+Two triggers, because they catch different things:
+
+| | Fires on | Catches | Misses |
+| --- | --- | --- | --- |
+| `OnFailure=` drop-in on each watched unit | the *transition* into `failed` | a nightly backup that just died, within seconds | a unit already broken before this was deployed; a unit that is merely stopped |
+| `alert-systemd-sweep.timer`, daily at 08:15 | the *state* of the machine | everything in `systemctl --failed`, watched units that are not running, a timer that disappeared, and the alerting units' own failures | nothing until the next morning |
+
+Both run the same script, `/usr/local/sbin/alert_systemd_failure.sh`, which sends one Sentry
+event per unit with a fingerprint of `systemd-unit-failure` + the unit name — so a unit gets
+one Sentry issue, not one per day, and closing it means the panne is handled. The last 50
+journal lines of the unit ride along as breadcrumbs, so the alert says *why* without needing
+an SSH session.
+
+The sweep reads `systemctl --failed` in full, not just the list below: a failed unit nobody
+thought to declare — an `*_openfisca` service, something added later — is still reported. The
+list exists for the other half of the job, checking that a unit which should be running
+actually is, which no global query can guess.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `alerting_watched_units` | backup service + timer, `monitor_service`, `mongod`, `nginx`, the sweep itself | Units getting an `OnFailure=` drop-in; those with `expect_active: true` must also be running |
+| `alerting_sweep_on_calendar` | `*-*-* 08:15:00` | `OnCalendar=` of the daily sweep |
+| `alerting_sweep_max_events` | `10` | Cap on events per sweep, so a machine on fire does not open thirty issues |
+
+Adding a unit is two lines in `alerting_watched_units`. The page on `monitor.<fullname>` also
+publishes the state of these units next to its URL probes.
+
+#### Where the DSN comes from
+
+The alerting units run as `root`, and a root unit has no business reading an application
+`.env` — that file belongs to the deployment user, so anyone who can write it could inject
+code into a root shell, and it carries every other application secret. The units are hardened
+with `ProtectHome=true` and could not read it anyway.
+
+So ansible, during `bootstrap.yaml`, extracts the single `SENTRY_CRON_DSN` line from the
+default application's `.env` and writes it to `/etc/aides-jeunes/alerting.env`, `0600
+root:root`, containing that one variable and nothing else. **No DSN is stored in this
+repository or in any inventory**, and the value never transits through an ansible variable:
+`/usr/local/sbin/sync_alerting_dsn.sh` does the extraction on the machine and only reports
+whether it changed.
+
+There is no other channel available: deployment is an SSH forced command that runs
+`ansible-playbook --connection=local` on the server itself (`scripts/update_ops.sh`), with no
+way to pass `--extra-vars`, so a GitHub secret or an ansible-vault variable could not reach
+the play without a vault password file on the server — that is, the same server-side secret
+with more machinery. `bootstrap.yaml` replays on every merge to `main`, so rotating
+`SENTRY_CRON_DSN` in the `.env` propagates on the next deployment.
+
+If the `.env` is not there yet — a brand new machine — the play prints a warning and carries
+on, and the alerting scripts exit non-zero with an explicit message rather than pretending to
+send anything.
+
+#### Checking that it works
+
+```bash
+systemctl list-timers alert-systemd-sweep.timer   # when the sweep last ran and runs next
+systemctl start alert-systemd-sweep.service       # run it now
+journalctl -u alert-systemd-sweep.service         # what it found, and whether it could report
+systemctl list-units --failed                     # the same question, without Sentry
+curl -s https://monitor.<fullname> | jq .units    # unit states on the status page
+```
+
+#### Limits you need to know about
+
+**A unit that restarts forever is invisible here.** A service with `Restart=on-failure` that
+crashes slowly enough never exhausts its start limit, so it never enters `failed`, never
+triggers `OnFailure=`, and never shows up in `systemctl --failed`. What catches it is the
+URL probe on the status page returning 0 or 502 — which is why the two halves of that page
+are complementary and neither replaces the other.
+
+**Sentry is a single point of failure.** If the DSN is wrong, the project is full, or the
+network is down, nothing arrives. The failure is at least loud locally: `sentry-cli` exits
+non-zero, the alerting unit lands in `failed`, and the *next* sweep reports it — verified.
+But a sweep whose timer has been disabled reports nothing at all and says nothing about it;
+the only remaining witness is then the status page, which is why the sweep units are in the
+watched list.
+
+**Nobody is paged.** These events land in Sentry like the cron failures already do, and
+inherit whatever notification rules that project has. If nobody has an alert rule on this
+project, this mechanism replaces a silence with a line in a web interface. Setting up the
+Sentry alert rule for the `systemd-unit-failure` fingerprint is the other half of the job,
+and it is not done here.
+
+**Removing a unit from `alerting_watched_units` leaves its drop-in behind.** Ansible writes
+`/etc/systemd/system/<unit>.d/50-onfailure.conf` and never removes it; delete it by hand.
+
+**The status page reads unit states over the D-Bus system bus.** `monitor_service` runs as
+the deployment user, and an unprivileged `systemctl show` needs `/run/dbus/system_bus_socket`
+— unlike the alerting units, which run as root and go through systemd's private socket. If
+`dbus` is not installed, every unit on the page comes back as `"ok": false` with the bus
+error in an `error` field, which is visible but is a false alarm. The Sentry alerting is
+unaffected.
+
+**Unit states are published on a page with no authentication**, next to the disk usage and
+the URL probes already there. It says a bit about the machine's internals — that a backup is
+broken, for instance. Only the units listed in `alerting_watched_units` are published, never
+the full `systemctl --failed` output.
+
 ### Migrating mongodb collections between servers
 
 > This is a manual, one-shot migration tool, **not** a backup. An operator triggers it, it

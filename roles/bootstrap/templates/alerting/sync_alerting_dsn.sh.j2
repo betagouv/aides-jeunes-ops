@@ -1,0 +1,72 @@
+#!/bin/bash
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/alerting/sync_alerting_dsn.sh.j2
+
+# Recopie le seul SENTRY_CRON_DSN du .env applicatif vers un fichier
+# d'environnement fermé (0600 root:root), d'où les unités d'alerte le liront.
+#
+# Le DSN n'existe nulle part dans ce dépôt et ne transite par aucune variable
+# ansible : ce script tourne sur la machine, lit la valeur là où elle est déjà,
+# et ne l'affiche jamais.
+
+set -euo pipefail
+umask 0077
+
+source_env="{{ alerting_dsn_source }}"
+target_env="{{ alerting_env_file }}"
+
+fail() {
+  printf 'SYNCHRONISATION DU DSN SENTRY IMPOSSIBLE : %s\n' "$1" >&2
+  exit 1
+}
+
+if [ ! -r "$source_env" ]; then
+  fail "$source_env est absent ou illisible"
+fi
+
+# `sed` plutôt que `source` : le .env appartient à l'utilisateur de déploiement
+# et ce script tourne en root. Le sourcer donnerait une exécution de code en
+# root à quiconque peut écrire ce fichier, et importerait au passage tous les
+# autres secrets applicatifs dans l'environnement du processus.
+# La dernière affectation gagne, comme le ferait un interpréteur de .env.
+dsn="$(
+  sed -n \
+    -e 's/^[[:space:]]*//' \
+    -e 's/^export[[:space:]]\{1,\}//' \
+    -e 's/^SENTRY_CRON_DSN[[:space:]]*=[[:space:]]*//p' \
+    "$source_env" | tail -n 1
+)"
+
+# Retrait du retour chariot d'un fichier édité sous Windows, puis des
+# guillemets éventuels autour de la valeur.
+dsn="${dsn%$'\r'}"
+dsn="${dsn%\"}"
+dsn="${dsn#\"}"
+dsn="${dsn%\'}"
+dsn="${dsn#\'}"
+
+# Contrôle de forme, sans jamais afficher la valeur : un DSN Sentry est une URL.
+# Sans ce contrôle, une ligne commentée ou une valeur vide produirait un fichier
+# d'alerte syntaxiquement correct dont le seul effet serait de faire échouer
+# chaque alerte, au moment précis où on en a besoin.
+case "$dsn" in
+  https://*@*/* | http://*@*/*) ;;
+  "") fail "SENTRY_CRON_DSN est absent ou vide dans $source_env" ;;
+  *) fail "SENTRY_CRON_DSN de $source_env n'a pas la forme d'un DSN Sentry" ;;
+esac
+
+candidate="$target_env.candidate"
+printf 'SENTRY_DSN=%s\n' "$dsn" >"$candidate"
+chmod 0600 "$candidate"
+chown root:root "$candidate"
+
+# Écriture uniquement si la valeur a bougé : ansible reste idempotent, et le
+# fichier ne change pas d'horodatage à chaque déploiement.
+if cmp -s "$candidate" "$target_env"; then
+  rm -f "$candidate"
+  printf 'DSN inchangé.\n'
+  exit 0
+fi
+
+mv "$candidate" "$target_env"
+printf 'DSN mis à jour.\n'

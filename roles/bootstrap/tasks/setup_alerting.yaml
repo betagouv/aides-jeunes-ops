@@ -1,0 +1,111 @@
+---
+- name: Set alerting variables
+  ansible.builtin.set_fact:
+    alerting_directory: /etc/aides-jeunes
+    alerting_env_file: /etc/aides-jeunes/alerting.env
+    alerting_script_path: /usr/local/sbin/alert_systemd_failure.sh
+    alerting_dsn_sync_script_path: /usr/local/sbin/sync_alerting_dsn.sh
+    # Le DSN d'alerte est déjà sur la machine, dans le .env de l'application par
+    # défaut : c'est celui qu'utilisent les tâches cron. On le reprend là plutôt
+    # que d'en introduire un second à gérer et à faire tourner.
+    alerting_dsn_source: >-
+      /home/{{ server_user_name }}/{{ applications | selectattr('default_site', 'defined')
+      | selectattr('default_site') | map(attribute='name') | first }}/repository/.env
+- name: Create alerting configuration directory
+  ansible.builtin.file:
+    path: "{{ alerting_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+- name: Install alerting DSN synchronisation script
+  ansible.builtin.template:
+    src: templates/alerting/sync_alerting_dsn.sh.j2
+    dest: "{{ alerting_dsn_sync_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+# Le .env applicatif n'est pas produit par ce dépôt : il est déposé à la main
+# sur le serveur. Sur une machine neuve il n'existe pas encore, et l'alerte doit
+# le dire au lieu de faire échouer tout le bootstrap.
+- name: Check that the application environment file exists
+  ansible.builtin.stat:
+    path: "{{ alerting_dsn_source }}"
+  register: alerting_dsn_source_stat
+- name: Copy the Sentry DSN into the alerting environment file
+  when: alerting_dsn_source_stat.stat.exists
+  ansible.builtin.command:
+    cmd: "{{ alerting_dsn_sync_script_path }}"
+  register: alerting_dsn_sync
+  changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
+- name: Report a missing DSN source
+  when: not alerting_dsn_source_stat.stat.exists
+  ansible.builtin.debug:
+    msg: >-
+      [WARNING] {{ alerting_dsn_source }} est absent : SENTRY_CRON_DSN n'a pas pu être
+      recopié dans {{ alerting_env_file }}. Les unités d'alerte échoueront bruyamment
+      tant que ce fichier n'existe pas. Le déposer puis rejouer bootstrap.yaml.
+- name: Install systemd failure alerting script
+  ansible.builtin.template:
+    src: templates/alerting/alert_systemd_failure.sh.j2
+    dest: "{{ alerting_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+- name: Setup systemd failure alerting service template
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-failure@.service.j2
+    dest: /etc/systemd/system/{{ alerting_failure_service_name }}@.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+- name: Setup systemd sweep service
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-sweep.service.j2
+    dest: /etc/systemd/system/{{ alerting_sweep_service_name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+- name: Setup systemd sweep timer
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-sweep.timer.j2
+    dest: /etc/systemd/system/{{ alerting_sweep_service_name }}.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+- name: Create drop-in directory for each watched unit
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ watched_unit.name }}.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ alerting_watched_units }}"
+  loop_control:
+    loop_var: watched_unit
+    label: "{{ watched_unit.name }}"
+- name: Wire OnFailure alerting on each watched unit
+  ansible.builtin.template:
+    src: templates/alerting/onfailure.conf.j2
+    dest: /etc/systemd/system/{{ watched_unit.name }}.d/50-onfailure.conf
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ alerting_watched_units }}"
+  loop_control:
+    loop_var: watched_unit
+    label: "{{ watched_unit.name }}"
+  notify: Reload systemd
+# Le gestionnaire de rechargement est différé jusqu'au prochain point de
+# synchronisation : sans ce drapeau, systemd démarrerait le timer sur une
+# définition d'unité qu'il ne connaît pas encore.
+- name: Reload systemd before enabling the sweep timer
+  ansible.builtin.meta: flush_handlers
+- name: Enable and start the systemd sweep timer
+  ansible.builtin.systemd:
+    name: "{{ alerting_sweep_service_name }}.timer"
+    enabled: true
+    state: started

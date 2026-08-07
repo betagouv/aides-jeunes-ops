@@ -44,6 +44,10 @@
   ansible.builtin.include_tasks: setup_monitor.yaml
   when: monitor and monitor.port
 
+## Setup systemd failure alerting
+- name: Configure systemd failure alerting
+  ansible.builtin.include_tasks: setup_alerting.yaml
+
 ## Provision and setup all applications
 - name: Setup default application site
   ansible.builtin.include_tasks: nginx_application_default_site.yaml

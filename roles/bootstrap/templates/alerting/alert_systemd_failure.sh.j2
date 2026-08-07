@@ -1,0 +1,173 @@
+#!/bin/bash
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/alerting/alert_systemd_failure.sh.j2
+
+# Pousse un événement Sentry pour chaque unité systemd en défaut.
+#
+#   alert_systemd_failure.sh <unité>   une unité nommée, appelé par `OnFailure=`
+#   alert_systemd_failure.sh --sweep   balayage de l'état du système, quotidien
+#
+# Les deux modes existent parce qu'ils n'attrapent pas la même chose.
+# `OnFailure=` réagit à une *transition* : il alerte à la seconde où l'unité
+# tombe, et seulement à ce moment-là. Le balayage lit un *état* : il retrouve
+# une unité tombée avant l'installation du mécanisme, une unité arrêtée qui
+# aurait dû tourner, un timer disparu — et il redit chaque jour ce qui reste
+# cassé. Le service de supervision est resté en échec un an sans que la
+# transition, unique et passée, ne serve à personne.
+#
+# Toute anomalie sort en code non nul : l'unité d'alerte passe elle-même en
+# `failed`, ce que le balayage suivant remonte. Aucun repli silencieux.
+
+set -euo pipefail
+
+env_file="{{ alerting_env_file }}"
+instance="{{ instance_name }}"
+max_events={{ alerting_sweep_max_events }}
+# Unités dont on attend qu'elles tournent. Un service déclenché par un timer
+# n'y figure pas : son état normal est « inactive ».
+# Test sur la concaténation et non sur le cardinal du tableau : la syntaxe bash
+# du cardinal accole une accolade et un dièse, que Jinja lit comme une
+# ouverture de commentaire — le gabarit ne se rendrait plus du tout.
+watched_active=({% for unit in alerting_watched_units if unit.expect_active %}"{{ unit.name }}" {% endfor %})
+
+fail() {
+  printf 'ALERTE SYSTEMD IMPOSSIBLE : %s\n' "$1" >&2
+  exit 1
+}
+
+command -v sentry-cli >/dev/null ||
+  fail "sentry-cli est introuvable, aucun événement ne peut partir"
+
+if [ ! -r "$env_file" ]; then
+  fail "$env_file est absent ou illisible — rejouer bootstrap.yaml pour le réinstaller"
+fi
+# Fichier écrit par ansible, root:root 0600, et ne contenant que SENTRY_DSN.
+# shellcheck disable=SC1090
+. "$env_file"
+if [ -z "${SENTRY_DSN:-}" ]; then
+  fail "SENTRY_DSN est absent de $env_file"
+fi
+
+hostname_fqdn="$(uname -n)"
+
+unit_property() {
+  systemctl show "$1" --property="$2" --value
+}
+
+# Un événement par unité, empreinte stable : Sentry regroupe toutes les alertes
+# d'une même unité dans un seul ticket, qu'on résout quand la panne est traitée.
+# Le détail volatil (journal, code de sortie) part en pièces jointes et non dans
+# le message, sans quoi chaque exécution ouvrirait un ticket de plus.
+send_event() {
+  local unit="$1"
+  local summary="$2"
+  local journal
+  local status
+
+  journal="$(mktemp)"
+  # Le journal de l'unité porte la cause réelle : la ligne de mongodump qui a
+  # échoué, la trace du crash au démarrage. Sans elle, l'alerte oblige à se
+  # connecter à la machine pour apprendre quoi que ce soit.
+  if ! journalctl --unit "$unit" --lines=50 --no-pager --output=short-iso >"$journal" 2>&1; then
+    printf 'journalctl a échoué pour %s, journal indisponible\n' "$unit" >>"$journal"
+  fi
+
+  # --no-environ : sans ce drapeau, sentry-cli joint l'environnement du
+  # processus à l'événement. Ce script tourne en root et a chargé un DSN.
+  status=0
+  SENTRY_DSN="$SENTRY_DSN" sentry-cli send-event \
+    --no-environ \
+    --level error \
+    --message "$summary" \
+    --fingerprint "systemd-unit-failure" \
+    --fingerprint "$unit" \
+    --tag "unit:$unit" \
+    --tag "instance:$instance" \
+    --tag "host:$hostname_fqdn" \
+    --extra "load_state:$(unit_property "$unit" LoadState)" \
+    --extra "active_state:$(unit_property "$unit" ActiveState)" \
+    --extra "sub_state:$(unit_property "$unit" SubState)" \
+    --extra "result:$(unit_property "$unit" Result)" \
+    --extra "exec_main_status:$(unit_property "$unit" ExecMainStatus)" \
+    --logfile "$journal" || status=$?
+
+  rm -f "$journal"
+
+  if [ "$status" -ne 0 ]; then
+    printf 'sentry-cli a échoué (code %s) pour %s\n' "$status" "$unit" >&2
+    return "$status"
+  fi
+  printf 'Événement Sentry émis pour %s : %s\n' "$unit" "$summary"
+}
+
+sweep() {
+  local sent=0
+  local failed_total=0
+  local unit
+  local state
+  local send_status=0
+  local failed_units
+
+  # Toutes les unités en échec, pas seulement celles qu'on a pensé à lister :
+  # c'est ce qui couvre les services openfisca, dont le nom dépend de
+  # l'inventaire, et tout ce qui sera ajouté à la machine plus tard.
+  # `--plain` retire la puce que systemd place devant une unité en échec, sans
+  # quoi le nom lu serait « ● ».
+  failed_units="$(systemctl list-units --state=failed --all --no-legend --plain)" ||
+    fail "systemctl list-units a échoué, impossible de connaître l'état du système"
+
+  while read -r unit _; do
+    [ -n "$unit" ] || continue
+    failed_total=$((failed_total + 1))
+    if [ "$sent" -ge "$max_events" ]; then
+      continue
+    fi
+    send_event "$unit" "systemd : unité en échec — $unit" || send_status=1
+    sent=$((sent + 1))
+  done <<<"$failed_units"
+
+  if [ "$failed_total" -gt "$max_events" ]; then
+    printf '%s unités en échec, seules les %s premières ont été remontées.\n' \
+      "$failed_total" "$max_events" >&2
+  fi
+
+  # Une unité arrêtée, jamais démarrée, ou dont le fichier a disparu n'est pas
+  # « en échec » : elle est simplement absente. C'est un mode de panne muet, et
+  # le seul contrôle qui l'attrape est celui-ci.
+  if [ -n "${watched_active[*]}" ]; then
+    for unit in "${watched_active[@]}"; do
+      state="$(unit_property "$unit" ActiveState)"
+      # `failed` est déjà remonté par le balayage ci-dessus.
+      if [ "$state" = "active" ] || [ "$state" = "failed" ]; then
+        continue
+      fi
+      send_event "$unit" "systemd : unité attendue active, état « $state » — $unit" ||
+        send_status=1
+      sent=$((sent + 1))
+    done
+  fi
+
+  if [ "$sent" -eq 0 ]; then
+    printf 'Balayage systemd : aucune unité en défaut.\n'
+  fi
+
+  # Le balayage ne rend un code non nul que si *l'émission* a échoué. Signaler
+  # une panne n'est pas en être une : sortir en erreur ici mettrait le balayage
+  # en échec et le ferait s'alerter lui-même en boucle.
+  return "$send_status"
+}
+
+case "${1:-}" in
+  --sweep)
+    sweep
+    ;;
+  "")
+    fail "aucun argument : attendu une unité systemd ou --sweep"
+    ;;
+  -*)
+    fail "option inconnue « $1 » : attendu une unité systemd ou --sweep"
+    ;;
+  *)
+    send_event "$1" "systemd : unité en échec — $1"
+    ;;
+esac
