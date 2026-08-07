@@ -26,5 +26,6 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 
-[Install]
-WantedBy=multi-user.target
+# Pas de section [Install] : ce service est déclenché par son timer, et par lui
+# seul. Un `WantedBy=multi-user.target` le rendrait activable, et une sauvegarde
+# partirait alors à chaque démarrage de la machine.
