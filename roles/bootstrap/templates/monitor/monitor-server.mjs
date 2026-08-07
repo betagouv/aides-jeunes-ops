@@ -1,6 +1,6 @@
 import { createServer } from "http"
 import { execSync } from "child_process"
-import configuration from "./monitor-config.json" assert { type: "json" }
+import configuration from "./monitor-config.json" with { type: "json" }
 
 const services = configuration.applications
 
