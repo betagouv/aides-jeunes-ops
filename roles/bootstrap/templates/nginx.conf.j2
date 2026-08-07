@@ -49,9 +49,12 @@ http {
   {% endif %}
 {% endfor %}
   map $host $simulation_app {
-    # Un hôte inconnu rejoint le budget de l'application par défaut : c'est elle
-    # qu'un `default_server` sert. Une clé propre lui donnerait un budget
-    # supplémentaire, une clé vide désactiverait le comptage.
+    # Tout `$host` absent de cette table — balayage par adresse IP, en-tête
+    # forgé, sous-domaine inconnu — retombe ici. Aucun `default_server` n'est
+    # déclaré en production : nginx sert alors le premier vhost du port, et ce
+    # trafic doit rejoindre le budget de l'application par défaut plutôt que
+    # d'obtenir un budget propre, qui s'ajouterait au sien, ou une clé vide,
+    # qui désactiverait le comptage.
     default "{{ default_application.name }}";
 {% for host, name in host_pairs | unique(attribute=0) %}
     {{ host }} "{{ name }}";
