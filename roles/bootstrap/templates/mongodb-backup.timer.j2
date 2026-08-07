@@ -1,0 +1,12 @@
+[Unit]
+Description=Déclenche la sauvegarde quotidienne des bases MongoDB de {{ instance_name }}
+
+[Timer]
+OnCalendar={{ mongodb_backup_on_calendar }}
+# Rattrape l'exécution manquée si la machine était éteinte à l'heure prévue.
+Persistent=true
+AccuracySec=1min
+Unit={{ mongodb_backup_service_name }}.service
+
+[Install]
+WantedBy=timers.target

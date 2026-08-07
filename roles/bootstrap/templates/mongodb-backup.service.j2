@@ -1,0 +1,30 @@
+[Unit]
+Description=Sauvegarde des bases MongoDB de {{ instance_name }}
+Documentation=https://github.com/betagouv/aides-jeunes-ops
+# Ordonnancement seulement, sans Wants= ni Requires= : une sauvegarde ne doit
+# jamais démarrer la base de production. Si mongod est arrêté — panne ou
+# maintenance délibérée —, mongodump échoue et le service passe en `failed`.
+# La panne remonte au lieu d'être absorbée par un redémarrage automatique.
+After=mongod.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart={{ mongodb_backup_script_path }}
+
+# Le service n'a besoin d'écrire que dans le répertoire des sauvegardes. Le
+# reste du système lui est en lecture seule : une erreur de configuration ne
+# peut pas déposer d'archive sous /var/www ni dans un dépôt applicatif.
+ProtectSystem=strict
+ReadWritePaths={{ mongodb_backup_directory }}
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -27,6 +27,10 @@
 - name: Install mongoDB 6.x
   ansible.builtin.include_tasks: install_mongodb.yaml
 
+## Setup MongoDB backup
+- name: Configure MongoDB backup
+  ansible.builtin.include_tasks: setup_mongodb_backup.yaml
+
 ## Setup Let's encrypt / Certbot
 - name: Install and configure certbot
   ansible.builtin.include_tasks: install_certbot.yaml
