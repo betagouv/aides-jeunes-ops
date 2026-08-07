@@ -2,19 +2,37 @@
 # MANAGED BY MES AIDES OPS
 # Modifications should be made in templates/alerting/sync_alerting_dsn.sh.j2
 
-# Recopie le seul SENTRY_CRON_DSN du .env applicatif vers un fichier
-# d'environnement fermé (0600 root:root), d'où les unités d'alerte le liront.
+# Compose le DSN d'alerte et l'écrit dans un fichier d'environnement fermé
+# (0600 root:root), d'où les unités d'alerte le liront.
 #
-# Le DSN n'existe nulle part dans ce dépôt et ne transite par aucune variable
-# ansible : ce script tourne sur la machine, lit la valeur là où elle est déjà,
-# et ne l'affiche jamais.
+# LE POINT IMPORTANT DE CE SCRIPT : la destination — schéma, hôte, port, projet —
+# vient du DÉPÔT (`alerting_dsn_destination`, relu en revue de code). Du .env
+# applicatif, on ne prend QUE la clé publique, et on vérifie qu'elle est faite
+# uniquement de lettres et de chiffres.
+#
+# Ce découpage est structurel, pas défensif. Le .env appartient à l'utilisateur
+# de déploiement : tout ce qu'il contient est hostile par hypothèse. Tant qu'on
+# lisait la destination dedans, il fallait décider par comparaison de texte si
+# une URL fournie par un tiers pointait au bon endroit — et une comparaison
+# d'URL en shell se fait contourner : d'abord aucun ancrage, puis l'hôte sans le
+# chemin, puis un glob qui traverse la barre oblique. Ici il n'y a plus rien à
+# comparer. Une clé restreinte à [A-Za-z0-9] ne peut contenir ni « @ », ni « / »,
+# ni « : » : elle ne peut donc pas ajouter d'autorité ni de chemin, quoi qu'on
+# écrive dans le .env.
+#
+# Ce qui reste au propriétaire du .env : mettre une mauvaise clé, donc CASSER
+# l'alerte. Il ne peut plus la DÉTOURNER. C'est une réduction de la panne à
+# quelque chose de bruyant, que l'auto-contrôle et le balayage quotidien voient.
+#
+# La clé ne transite par aucune variable ansible et n'est jamais affichée.
 
 set -euo pipefail
 umask 0077
 
 source_env="{{ alerting_dsn_source }}"
 target_env="{{ alerting_env_file }}"
-allowed_destinations="{{ alerting_dsn_allowed_destinations | join(' ') }}"
+scheme="{{ alerting_dsn_scheme }}"
+destination="{{ alerting_dsn_destination }}"
 
 fail() {
   printf 'SYNCHRONISATION DU DSN SENTRY IMPOSSIBLE : %s\n' "$1" >&2
@@ -32,7 +50,7 @@ fi
 # root à quiconque peut écrire ce fichier, et importerait au passage tous les
 # autres secrets applicatifs dans l'environnement du processus.
 # La dernière affectation gagne, comme le ferait un interpréteur de .env.
-dsn="$(
+raw="$(
   sed -n \
     -e 's/^[[:space:]]*//' \
     -e 's/^export[[:space:]]\{1,\}//' \
@@ -47,96 +65,44 @@ trim() {
 # ORDRE IMPORTANT : les espaces de fin d'abord, les guillemets ensuite, puis de
 # nouveau les espaces qui étaient à l'intérieur des guillemets. Retirer les
 # guillemets en premier laisse le guillemet fermant collé à la valeur dès que la
-# ligne du .env se termine par une espace — invisible à la lecture, et le
-# fichier produit désarmerait alors chaque alerte sans que rien ne le signale.
-dsn="$(trim "$dsn")"
-case "$dsn" in
+# ligne du .env se termine par une espace — invisible à la lecture.
+raw="$(trim "$raw")"
+case "$raw" in
   \"*\")
-    dsn="${dsn%\"}"
-    dsn="${dsn#\"}"
+    raw="${raw%\"}"
+    raw="${raw#\"}"
     ;;
   \'*\')
-    dsn="${dsn%\'}"
-    dsn="${dsn#\'}"
+    raw="${raw%\'}"
+    raw="${raw#\'}"
     ;;
 esac
-dsn="$(trim "$dsn")"
+raw="$(trim "$raw")"
 
-# Contrôle de jeu de caractères et de forme, sans jamais afficher la valeur.
-# Le jeu de caractères est le contrôle qui compte, et il est délibérément une
-# liste blanche : cette valeur finit dans un fichier que lisent des unités
-# tournant en root. Un `$(…)`, un accent grave, une espace ou un guillemet
-# rescapé n'y ont rien à faire — les refuser ici ferme la voie par laquelle le
-# propriétaire du .env, qui n'est pas root, pousserait du contenu de son choix
-# vers un contexte root.
-# Une valeur vide est refusée pour une autre raison : elle produirait un fichier
-# syntaxiquement correct dont le seul effet serait de faire échouer chaque
-# alerte, au moment précis où on en a besoin.
-case "$dsn" in
-  "") fail "SENTRY_CRON_DSN est absent ou vide dans $source_env" ;;
-  *[!A-Za-z0-9:/@._~%?=-]*)
-    fail "SENTRY_CRON_DSN de $source_env contient un caractère interdit"
+if [ -z "$raw" ]; then
+  fail "SENTRY_CRON_DSN est absent ou vide dans $source_env"
+fi
+
+# Extraction de la seule clé publique. `%%@*` prend ce qui précède la PREMIÈRE
+# arobase : sur un DSN bien formé c'est la clé, et sur n'importe quoi d'autre le
+# résultat contiendra un caractère hors liste blanche et sera refusé juste après.
+# Aucune décision n'est prise à partir de ce qui suit — la destination, elle,
+# vient du dépôt.
+key="${raw#*://}"
+key="${key%%@*}"
+
+# Liste blanche stricte, sur un jeton simple et non sur une URL : c'est tout
+# l'intérêt du découpage. Une clé publique Sentry est alphanumérique.
+case "$key" in
+  "") fail "SENTRY_CRON_DSN de $source_env ne comporte pas de clé publique" ;;
+  *[!A-Za-z0-9]*)
+    fail "la clé publique de SENTRY_CRON_DSN ($source_env) contient un caractère interdit"
     ;;
-  https://*@*/* | http://*@*/*) ;;
-  *) fail "SENTRY_CRON_DSN de $source_env n'a pas la forme d'un DSN Sentry" ;;
 esac
 
-# La validation ci-dessus porte sur la SYNTAXE. Il reste la DESTINATION, qui est
-# le vrai enjeu : ce DSN décide où partent les journaux d'unités root — mongod,
-# nginx, la sauvegarde — que le propriétaire du .env ne peut pas lire lui-même.
-# Le pointer ailleurs, c'est à la fois exfiltrer ces journaux et éteindre toute
-# l'alerte derrière un puits qui répond 200, auto-contrôle compris.
-#
-# La destination, c'est l'hôte ET LE CHEMIN. S'arrêter à l'hôte ne ferme rien :
-# créer un second projet sur le même Sentry — mutualisé, auto-hébergé, ou un DSN
-# sans sous-domaine d'organisation — suffirait alors à tout détourner sans
-# changer un caractère de l'hôte. Seule la CLÉ reste libre : c'est le seul champ
-# qui doit pouvoir tourner.
-dsn_destination="${dsn#*://}"
-dsn_destination="${dsn_destination#*@}"
-if [ -z "$dsn_destination" ] || [ "$dsn_destination" = "$dsn" ]; then
-  fail "SENTRY_CRON_DSN de $source_env ne comporte pas de destination exploitable"
-fi
-
-if [ -n "$allowed_destinations" ]; then
-  # Ancrage explicite : `alerting_dsn_allowed_destinations` est renseigné, la
-  # destination doit y figurer. C'est le réglage le plus sûr, à privilégier dès
-  # que l'hôte et le projet sont connus.
-  destination_allowed=0
-  for allowed in $allowed_destinations; do
-    # shellcheck disable=SC2254 # motif glob voulu, pour autoriser « *.exemple.tld/4 »
-    case "$dsn_destination" in
-      $allowed)
-        destination_allowed=1
-        break
-        ;;
-    esac
-  done
-  if [ "$destination_allowed" -eq 0 ]; then
-    fail "destination « $dsn_destination » absente de alerting_dsn_allowed_destinations — refus de rediriger l'alerte"
-  fi
-elif [ -f "$target_env" ]; then
-  # Aucun ancrage déclaré : on épingle sur ce qui est déjà en place. Tout
-  # changement de destination est refusé, et le DSN en place continue de
-  # fonctionner pendant ce temps — le refus ne coupe pas l'alerte, il la protège.
-  # Rotation légitime : renseigner alerting_dsn_allowed_destinations, ou
-  # supprimer le fichier cible pour ré-adopter.
-  current_destination="$(sed -n 's/^SENTRY_DSN=//p' "$target_env" | tail -n 1)"
-  current_destination="${current_destination#*://}"
-  current_destination="${current_destination#*@}"
-  if [ -n "$current_destination" ] && [ "$current_destination" != "$dsn_destination" ]; then
-    fail "changement de destination refusé : « $current_destination » est en place, le .env propose « $dsn_destination ». Renseigner alerting_dsn_allowed_destinations, ou supprimer $target_env pour ré-adopter."
-  fi
-else
-  # Ni liste blanche, ni destination déjà épinglée : il n'y a rien à quoi
-  # comparer. On adopte, mais on le DIT — l'adoption est signalée à part pour
-  # sortir en rouge côté ansible.
-  # Ce cas n'est pas théorique : `setup_alerting` tourne avant le
-  # provisionnement des applications, donc au tout premier bootstrap le .env
-  # n'existe pas encore et l'adoption n'a lieu qu'au passage suivant, quand
-  # l'utilisateur de déploiement tourne déjà.
-  adopted=1
-fi
+# Composition, et non recopie : les trois morceaux sont assemblés ici, deux
+# venant du dépôt et un seul du .env.
+dsn="$scheme://$key@$destination"
 
 candidate="$target_env.candidate"
 printf 'SENTRY_DSN=%s\n' "$dsn" >"$candidate"
@@ -152,8 +118,4 @@ if cmp -s "$candidate" "$target_env"; then
 fi
 
 mv "$candidate" "$target_env"
-if [ "${adopted:-0}" -eq 1 ]; then
-  printf 'DSN adopté sans point de comparaison : %s\n' "$dsn_destination"
-else
-  printf 'DSN mis à jour.\n'
-fi
+printf 'DSN mis à jour.\n'

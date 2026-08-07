@@ -228,7 +228,8 @@ a thought for anything that handles user data.
 | `alerting_watched_units` | backup service + timer, `monitor_service`, `mongod`, `nginx`, the sweep itself | Units getting an `OnFailure=` drop-in; those with `expect_active: true` must also be running |
 | `alerting_sweep_on_calendar` | `*-*-* 08:15:00` | `OnCalendar=` of the daily sweep |
 | `alerting_sweep_max_events` | `10` | Cap on events per sweep, so a machine on fire does not open thirty issues |
-| `alerting_dsn_allowed_destinations` | `[]` | `host[:port]/project` values the DSN may point to; empty means pin-on-first-use (see below) |
+| `alerting_dsn_destination` | *(none — must be set)* | `host[:port]/project` the alerts are sent to; the key comes from the `.env` (see below) |
+| `alerting_dsn_scheme` | `https` | Only worth changing for a self-hosted Sentry over plain HTTP |
 
 Adding a unit is two lines in `alerting_watched_units`. The name must carry its systemd
 suffix — `nginx.service`, not `nginx` — or the drop-in lands in a directory systemd does not
@@ -252,27 +253,47 @@ The alerting units run as `root`, and a root unit has no business reading an app
 `.env` — that file belongs to the deployment user, and it carries every other application
 secret. The units are hardened with `ProtectHome=true` and could not read it anyway.
 
-So ansible, during `bootstrap.yaml`, extracts the single `SENTRY_CRON_DSN` line from the
-default application's `.env` and writes it to `/etc/aides-jeunes/alerting.env`, `0600
-root:root`, containing that one variable and nothing else. **No DSN is stored in this
-repository or in any inventory**, and the value never transits through an ansible variable:
-`/usr/local/sbin/sync_alerting_dsn.sh` does the extraction on the machine and only reports
-whether it changed.
+So the DSN is **composed from two sources** rather than copied from one:
 
-There is no other channel available: deployment is an SSH forced command that runs
+| Part | Comes from | Why |
+| --- | --- | --- |
+| scheme + host + port + project | `alerting_dsn_scheme` / `alerting_dsn_destination`, in the inventory | not secrets — they authenticate nothing — and reviewed like any other line of this repository |
+| public key | `SENTRY_CRON_DSN` in the application `.env`, on the machine | the only part that is a credential, so it must not be in a public repository |
+
+`/usr/local/sbin/sync_alerting_dsn.sh` reads **only the key** from the `.env`, checks it is
+made of `[A-Za-z0-9]` and nothing else, and writes
+`<scheme>://<key>@<destination>` to `/etc/aides-jeunes/alerting.env`, `0600 root:root`, one
+variable and nothing else. **No key is stored in this repository or in any inventory**, and it
+never transits through an ansible variable.
+
+That split is the whole point, and it is worth spelling out. The `.env` belongs to the
+deployment user, so everything in it is hostile by assumption. As long as the *destination*
+was read from there, the code had to decide, by comparing text, whether a third party's URL
+pointed somewhere acceptable — and comparing URLs in shell kept being defeated: first no
+anchoring at all, then the host without the path, then a glob that walked straight through
+the `/`. Composing removes the comparison entirely. A key restricted to `[A-Za-z0-9]` cannot
+contain `@`, `/` or `:`, so it cannot contribute an authority or a path, whatever the `.env`
+says.
+
+What is left to whoever controls the `.env` is putting a **wrong key**, hence *breaking* the
+alerting. They can no longer *redirect* it. That is a deliberate trade: a loud failure that
+the self-test and the daily sweep both report, instead of a silent exfiltration.
+
+The key has to come from the machine: deployment is an SSH forced command that runs
 `ansible-playbook --connection=local` on the server itself (`scripts/update_ops.sh`), with no
 way to pass `--extra-vars`, so a GitHub secret or an ansible-vault variable could not reach
 the play without a vault password file on the server — that is, the same server-side secret
-with more machinery. `bootstrap.yaml` replays on every merge to `main`, so rotating
-`SENTRY_CRON_DSN` in the `.env` propagates on the next deployment.
+with more machinery. `bootstrap.yaml` replays on every merge to `main`, so rotating the key
+in `SENTRY_CRON_DSN` propagates on the next deployment. Rotating to a different *project*
+means changing `alerting_dsn_destination` too, and the mismatch fails loudly in between.
 
-The value crosses a privilege boundary — it comes from a file the deployment user owns and
-ends up in a file that root-owned units read — so it is treated as untrusted input at every
-step:
+The key still crosses a privilege boundary — it comes from a file the deployment user owns
+and ends up in a file that root-owned units read — so it is treated as untrusted input at
+every step:
 
-- **it is validated against a character whitelist** (`A-Za-z0-9:/@._~%?=-`) before being
-  written. A `$(…)`, a backtick, a quote or a space is refused outright, with a message that
-  never prints the value;
+- **it is validated against a character whitelist** (`A-Za-z0-9`, nothing else) before being
+  used. A `$(…)`, a backtick, a quote, a space, a `/` or an `@` is refused outright, with a
+  message that never prints the value;
 - **no script ever `source`s it.** `sync_alerting_dsn.sh` reads the `.env` with `sed`, and
   `alert_systemd_failure.sh` reads `alerting.env` the same way;
 - **the units get it through `EnvironmentFile=`**, which systemd parses itself, with no shell
@@ -281,33 +302,21 @@ step:
 Any one of those would do; all three are there because a shell substitution reaching a root
 unit is not a bug you want to discover in production.
 
-Validating the syntax is not enough, because the DSN also decides **where the alerts go**, and
-they carry the journals of root units the deployment user cannot read. Whoever can write the
-`.env` could therefore both exfiltrate those journals and switch the whole supervision off by
-pointing it at a sink that answers `200` — the self-test included. So the **destination** is
-anchored too.
+#### The one manual step
 
-Destination means **host *and* path** — `o1.ingest.sentry.io/4507`, not just the host.
-Anchoring the host alone closes nothing: on a shared or self-hosted Sentry, creating a second
-project on the same host is trivial, and every alert would go there without a single
-character of the host changing. The **key** is the one field left free, because it is the one
-that has to rotate.
+`alerting_dsn_destination` has **no default** — until it is filled in, the alerting units are
+installed but inert, and the play says so with a red (ignored) task. This is deliberate. The
+value is the part of `SENTRY_CRON_DSN` after the `@`, for example
+`o4507.ingest.de.sentry.io/4507123`; read it once on the server and put it in the inventory:
 
-- if `alerting_dsn_allowed_destinations` is set, the destination must match one of its
-  patterns. Use this as soon as the real one is known;
-- if it is empty — the default — the destination is **pinned on first use**: the first run
-  adopts what the `.env` says and any later change is refused. The DSN already in place keeps
-  working meanwhile, so the refusal protects the alerting instead of cutting it.
+```yaml
+      alerting_dsn_destination: o4507.ingest.de.sentry.io/4507123
+```
 
-The default is pin-on-first-use rather than a hardcoded list because this repository cannot
-know which Sentry instance the project uses, and a wrong guess would silence production
-alerting on the very day it is deployed. That first adoption is a bet, not a check — there is
-nothing to compare against — so **it is reported as a failed (ignored) task naming the
-adopted destination**. It deserves a look: `setup_alerting` runs *before* the applications
-are provisioned, so on a brand new machine the `.env` does not exist yet and the adoption
-happens on the second bootstrap, by which time the deployment user is already running.
-Confirm the destination, then freeze it in `alerting_dsn_allowed_destinations`. Deleting
-`/etc/aides-jeunes/alerting.env` re-adopts.
+A documented manual step, done once, is the price of never again having to decide in shell
+whether a third party's URL is legitimate. It also means the destination goes through code
+review like everything else in this repository, which is exactly where such a decision
+belongs.
 
 If the `.env` is not there yet — a brand new machine — or if the DSN is malformed, the play
 prints a warning and carries on rather than blocking the application deployment, and the

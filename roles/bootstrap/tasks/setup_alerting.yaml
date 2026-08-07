@@ -5,9 +5,11 @@
     alerting_env_file: /etc/aides-jeunes/alerting.env
     alerting_script_path: /usr/local/sbin/alert_systemd_failure.sh
     alerting_dsn_sync_script_path: /usr/local/sbin/sync_alerting_dsn.sh
-    # Le DSN d'alerte est déjà sur la machine, dans le .env de l'application par
-    # défaut : c'est celui qu'utilisent les tâches cron. On le reprend là plutôt
-    # que d'en introduire un second à gérer et à faire tourner.
+    # La CLÉ du DSN d'alerte est déjà sur la machine, dans le .env de
+    # l'application par défaut : c'est celle qu'utilisent les tâches cron. On la
+    # reprend là plutôt que d'en introduire une seconde à gérer et à faire
+    # tourner. La destination, elle, vient de l'inventaire — voir
+    # `alerting_dsn_destination` dans defaults/main.yaml.
     alerting_dsn_applications: >-
       {{ applications | selectattr('default_site', 'defined')
          | selectattr('default_site') | map(attribute='name') | list }}
@@ -33,6 +35,52 @@
       SENTRY_CRON_DSN. Les unités d'alerte sont installées mais resteront muettes.
     quiet: true
   register: alerting_default_application_check
+  ignore_errors: true
+# Le seul geste manuel de ce mécanisme. Il est assumé : lire la destination dans
+# le .env applicatif reviendrait à laisser l'utilisateur de déploiement choisir
+# où partent les journaux d'unités root, et à trancher par comparaison d'URL —
+# ce qui s'est fait contourner trois fois de suite.
+- name: Check that an alerting DSN destination is declared
+  ansible.builtin.assert:
+    that: alerting_dsn_destination | length > 0
+    fail_msg: >-
+      `alerting_dsn_destination` est vide : l'alerte est installée mais inerte.
+      Renseigner « hôte[:port]/projet » dans l'inventaire — la valeur se lit dans
+      SENTRY_CRON_DSN sur le serveur, entre le « @ » et la fin. Ni l'hôte ni le
+      numéro de projet ne sont des secrets, seule la clé en est un et elle reste
+      dans le .env.
+    quiet: true
+  register: alerting_dsn_destination_check
+  ignore_errors: true
+# La destination vient du dépôt, donc une faute de frappe y est une erreur de
+# revue, pas une attaque. Ce contrôle sert à la rendre lisible tout de suite
+# plutôt qu'à travers un échec de sentry-cli trois tâches plus loin.
+- name: Check that the alerting DSN destination is well formed
+  when: alerting_dsn_destination | length > 0
+  ansible.builtin.assert:
+    that:
+      - alerting_dsn_destination is match('^[A-Za-z0-9._~-]+(:[0-9]+)?/[A-Za-z0-9]+$')
+      - alerting_dsn_scheme in ['http', 'https']
+    fail_msg: >-
+      `alerting_dsn_destination` doit s'écrire « hôte[:port]/projet »
+      (exemple : o4507.ingest.de.sentry.io/4507123), sans schéma ni clé, et
+      `alerting_dsn_scheme` vaut http ou https. Reçu :
+      {{ alerting_dsn_scheme }}://{{ alerting_dsn_destination }}
+    quiet: true
+  register: alerting_dsn_destination_format_check
+  ignore_errors: true
+- name: Check that the sweep event cap is a sane integer
+  ansible.builtin.assert:
+    that:
+      - alerting_sweep_max_events is integer
+      - alerting_sweep_max_events | int >= 1
+      - alerting_sweep_max_events | int <= 500
+    fail_msg: >-
+      `alerting_sweep_max_events` doit être un entier entre 1 et 500. Reçu :
+      {{ alerting_sweep_max_events }}. Hors de ces bornes, le délai de garde
+      calculé du balayage devient nul ou négatif, que systemd lit « infinity ».
+    quiet: true
+  register: alerting_sweep_cap_check
   ignore_errors: true
 # Sans suffixe systemd, le greffon atterrit dans un répertoire que systemd ne lit
 # pas — /etc/systemd/system/nginx.d au lieu de nginx.service.d — et la même unité
@@ -60,8 +108,14 @@
     owner: root
     group: root
     mode: "0700"
+- name: Set whether the alerting DSN can be composed
+  ansible.builtin.set_fact:
+    alerting_dsn_ready: >-
+      {{ (alerting_dsn_source | length > 0)
+         and (alerting_dsn_destination | length > 0)
+         and (alerting_dsn_destination_format_check.failed | default(true) is false) }}
 - name: Install alerting DSN synchronisation script
-  when: alerting_dsn_source | length > 0
+  when: alerting_dsn_ready
   ansible.builtin.template:
     src: templates/alerting/sync_alerting_dsn.sh.j2
     dest: "{{ alerting_dsn_sync_script_path }}"
@@ -72,42 +126,23 @@
 # sur le serveur. Sur une machine neuve il n'existe pas encore.
 # `timeout` en tête de commande : le module `command` n'a pas de délai de garde,
 # et un .env remplacé par un tube nommé bloquerait le déploiement sans fin.
-- name: Copy the Sentry DSN into the alerting environment file
-  when: alerting_dsn_source | length > 0
+- name: Compose the alerting DSN from the declared destination and the .env key
+  when: alerting_dsn_ready
   ansible.builtin.command:
     cmd: timeout 60 {{ alerting_dsn_sync_script_path }}
   register: alerting_dsn_sync
-  changed_when: >-
-    'DSN mis à jour.' in alerting_dsn_sync.stdout
-    or 'DSN adopté' in alerting_dsn_sync.stdout
+  changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
   failed_when: false
-# Adopter une destination sans rien à quoi la comparer n'est pas une
-# vérification, c'est un pari. Il est tenu parce que l'alternative — refuser —
-# laisserait la supervision éteinte sur toute machine où personne n'a renseigné
-# la liste. Mais il doit se voir : `setup_alerting` tourne avant le
-# provisionnement des applications, donc l'adoption a lieu au deuxième bootstrap,
-# quand l'utilisateur de déploiement tourne déjà et peut avoir écrit le .env.
-- name: Check that no Sentry destination was adopted unverified
-  when: alerting_dsn_source | length > 0
-  ansible.builtin.assert:
-    that: "'DSN adopté' not in alerting_dsn_sync.stdout"
-    fail_msg: >-
-      {{ alerting_dsn_sync.stdout | default('') | trim }}
-      Aucune destination n'était épinglée et `alerting_dsn_allowed_destinations` est vide :
-      celle du .env vient d'être adoptée sans avoir été vérifiée. Confirmer qu'elle est
-      légitime, puis la figer dans `alerting_dsn_allowed_destinations`.
-    quiet: true
-  register: alerting_dsn_adoption_check
-  ignore_errors: true
-- name: Check that the Sentry DSN could be copied
-  when: alerting_dsn_source | length > 0
+- name: Check that the alerting DSN could be composed
+  when: alerting_dsn_ready
   ansible.builtin.assert:
     that: alerting_dsn_sync.rc == 0
     fail_msg: >-
-      SENTRY_CRON_DSN n'a pas pu être recopié dans {{ alerting_env_file }} :
+      Le DSN d'alerte n'a pas pu être écrit dans {{ alerting_env_file }} :
       {{ alerting_dsn_sync.stderr | default('') }}
       Les unités d'alerte échoueront bruyamment tant que ce sera le cas.
-      Corriger {{ alerting_dsn_source }} puis rejouer bootstrap.yaml.
+      Corriger la clé SENTRY_CRON_DSN dans {{ alerting_dsn_source }} puis rejouer
+      bootstrap.yaml.
     quiet: true
   register: alerting_dsn_sync_check
   ignore_errors: true

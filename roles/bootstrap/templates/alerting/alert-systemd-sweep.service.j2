@@ -20,7 +20,11 @@ ExecStart={{ alerting_script_path }} --sweep
 # 120 s de marge fixe. La figer en dur tronquerait le balayage dès qu'on relève
 # le plafond, et le tronquerait en `timeout`, c'est-à-dire en taisant les unités
 # restantes.
-TimeoutStartSec={{ (alerting_sweep_max_events | int) * 40 + 120 }}
+# Le plafond est borné à [1, 500] avant multiplication : `| int` rend 0 sur une
+# entrée non numérique, et une valeur négative donnerait un délai nul ou négatif
+# — que systemd lit « infinity », c'est-à-dire exactement le mode de panne que
+# cette ligne existe pour fermer.
+TimeoutStartSec={{ ([[alerting_sweep_max_events | int(10), 1] | max, 500] | min) * 40 + 120 }}
 
 ProtectSystem=strict
 ProtectHome=true

@@ -89,20 +89,20 @@ unit_property() {
   systemctl show "$1" --property="$2" --value
 }
 
-# Comparaison de chaînes, et non filtrage par motif : un nom d'unité peut porter
-# une échappée systemd (« var-lib\x2ddocker.mount »), et le contre-oblique
-# ferait rater la reconnaissance dans un motif `case` — d'où journal non joint et
-# double émission pour la même unité.
+# Appartenance testée sans jamais interpréter le nom d'unité :
+#  - pas de motif `case`, un contre-oblique d'échappée systemd
+#    (« var-lib\x2ddocker.mount ») y ferait rater la reconnaissance ;
+#  - pas de boucle `for item in $2` non plus, qui soumettrait chaque élément à
+#    l'expansion de chemin — « a*b.service » reconnaîtrait « aXb.service » si un
+#    fichier de ce nom existait dans le répertoire courant.
+# Dans les deux cas la conséquence est la même : journal non joint et double
+# émission pour une même unité.
+# Ici seule l'étoile de tête est un motif ; la partie entre guillemets est
+# comparée littéralement.
 in_list() {
   local needle="$1"
-  local item
-  # shellcheck disable=SC2086 # découpage voulu : un nom d'unité n'a pas d'espace
-  for item in $2; do
-    if [ "$item" = "$needle" ]; then
-      return 0
-    fi
-  done
-  return 1
+  local haystack=" $2 "
+  [ "${haystack#*" $needle "}" != "$haystack" ]
 }
 
 # Un événement par unité, empreinte stable : Sentry regroupe toutes les alertes
