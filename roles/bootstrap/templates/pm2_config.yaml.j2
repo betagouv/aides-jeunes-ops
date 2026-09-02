@@ -19,3 +19,11 @@ apps:
       OPENFISCA_INTERNAL_ROOT_URL: http://127.0.0.1:{{ item.openfisca_server_port }}
       OPENFISCA_TRACER_URL: https://openfisca.github.io/tracer
       PORT: {{ item.node_server_port }}
+      # Nginx proxifie sur 127.0.0.1 et reste le seul client légitime. Posé
+      # explicitement plutôt que laissé au défaut de l'application : c'est le
+      # déploiement qui décide de l'interface exposée, pas le code.
+      # Écrit littéralement, et non tiré de l'inventaire : l'amont nginx vise
+      # `127.0.0.1` en dur, et une adresse d'ÉCOUTE n'est pas une adresse de
+      # CONNEXION — un bouton qui ne piloterait que la première donnerait un 502
+      # silencieux. Changer d'interface se fait ici et dans l'amont, ensemble.
+      HOST: 127.0.0.1

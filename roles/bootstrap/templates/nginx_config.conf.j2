@@ -156,7 +156,16 @@ server {
                       text/xml;
   gzip_vary           on;
 
-  {% if nginx_root is defined and nginx_root %}
+  {% if not (expose_upstream | default(true)) %}
+  # Ce nom n'est pas publié : aucune requête extérieure n'atteint l'amont
+  # `{{ upstream_name }}`, déclaré dans conf.d/upstreams.conf. Le défi ACME garde
+  # sa place — son `location` est un préfixe plus long et l'emporte —, et là où
+  # `challenge_proxy` est posé il continue de relayer, ce qui est son rôle.
+  # 404 plutôt que 403 : refuser confirmerait qu'il y a quelque chose à refuser.
+  location / {
+    return            404;
+  }
+  {% elif nginx_root is defined and nginx_root %}
   root {{ nginx_root }};
 
   include snippets/mes-aides-static.conf;

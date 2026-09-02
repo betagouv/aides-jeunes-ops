@@ -1,7 +1,15 @@
 #jinja2: trim_blocks: True, lstrip_blocks: True
+{% if monitor is defined and monitor and monitor.port %}
+# Déclaré, mais proxifié par aucun vhost : la page de supervision n'est pas
+# publiée et se consulte en local sur ce port. Conservé pour que republier le
+# vhost reste un geste délibéré d'une ligne, et non un rendu qui casse.
+# La condition reprend celle des tâches qui posent le service, rendue défensive
+# — `monitor is defined` en plus — pour qu'un inventaire sans `monitor` rende
+# encore.
 upstream monitor {
-    server 127.0.0.1:8887;
+    server 127.0.0.1:{{ monitor.port }};
 }
+{% endif %}
 
 {% for application in applications %}
 # {{ application.name }}
