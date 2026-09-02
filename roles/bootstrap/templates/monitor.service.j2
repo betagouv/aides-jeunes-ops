@@ -11,6 +11,7 @@ WorkingDirectory={{ monitor_folder }}
 ExecStart=/usr/bin/node {{ monitor_filename }}
 ExecReload=/bin/kill -HUP $MAINPID
 Environment="PORT={{ monitor.port }}"
+Environment="HOST=127.0.0.1"
 Restart=on-failure
 
 [Install]

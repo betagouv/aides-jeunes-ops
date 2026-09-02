@@ -30,13 +30,61 @@
         - NODE_ENV: production
         - MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
         - MES_AIDES_ROOT_URL: http{{ 's' if item.https }}://{{ item.domain }}
+# `startOrRestart`, et non `startOrReload` : le rechargement roulant démarre le
+# nouveau worker pendant que l'ancien écoute encore. En mode cluster, c'est le
+# primaire pm2 qui détient la socket, indexée par `adresse:port` — un worker qui
+# demande une adresse différente de celle déjà détenue provoque un `bind()`
+# neuf, donc EADDRINUSE.
+#
+# Ce que devient cette collision dépend de `min_uptime` (1 s par défaut) : un
+# démarrage plus long qu'une seconde remet le compteur à zéro et pm2 converge ;
+# plus court, les échecs s'accumulent jusqu'à `max_restarts` et les quatre
+# workers finissent `errored`, plus rien n'écoute. L'application démarre en
+# 1,2 s mesuré : le rechargement roulant est un pile ou face, et le côté pile
+# est « site mort, déploiement vert ».
+#
+# Le prix est une coupure égale au temps de démarrage de l'application — 1,5 s
+# mesuré sur un banc, davantage sur la machine chargée — à CHAQUE déploiement,
+# là où le rechargement roulant n'en coûtait aucune en régime permanent
+# (mesuré : 0 réponse non-200 sur 234 sondes). C'est un coût accepté, pas un
+# coût qu'on payait déjà : c'est le prix du changement d'adresse, que le
+# rechargement roulant ne sait pas faire.
 - name: Pm2 restart {{ item.name }}
   become: true
   become_user: "{{ server_user_name }}"
   changed_when: true
-  ansible.builtin.command: pm2 startOrReload {{ application_folder }}/pm2_config.yaml --update-env
+  ansible.builtin.command: pm2 startOrRestart {{ application_folder }}/pm2_config.yaml --update-env
+# `pm2` rend 0 même quand tous les workers ont fini `errored` : sans cette
+# attente, un démarrage qui échoue laisse le site en 502 et le déploiement au
+# vert. Le redémarrage tuant les anciens workers d'abord, l'échec n'est plus
+# partiel — il est total. C'est la contrepartie à payer pour `startOrRestart`.
+#
+# Le délai n'est pas de la prudence, c'est ce qui rend la garde utile. Sondée
+# immédiatement, elle ne voit que le cas « le worker n'écoute jamais » : en mode
+# cluster la socket appartient au primaire et reste ouverte tant qu'un worker
+# vit, si bien qu'une application qui écoute puis meurt en boucle la satisfait à
+# t=0 et n'échoue qu'ensuite, hors de vue. Mesuré : les quatre workers finissent
+# `errored` vers t+9 s et la socket se ferme alors. Vingt secondes laissent
+# passer la boucle de redémarrage, et l'application réelle met 1,7 s à écouter.
+# Le délai écarte aussi une socket résiduelle de l'ancienne écoute.
+#
+# `timeout` court depuis AVANT le délai, pas après : `wait_for` prend son
+# horodatage de départ puis dort. Sur 80, il reste donc 60 s de sondage réel une
+# fois les 20 s écoulées.
+- name: Wait for the listening socket of {{ item.name }}
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item.node_server_port }}"
+    delay: 20
+    timeout: 80
+# `become: true` : c'est lui qui active l'escalade, et sans lui le `become_user`
+# ci-dessous reste lettre morte — cette commande tournait donc sous l'utilisateur
+# SSH. Conséquence observée en production — un `dump.pm2` de
+# `main` daté d'avril 2025 sur une machine qui déploie en continu, et un démon
+# pm2 parasite créé pour l'utilisateur de déploiement. Sans ce dump à jour, la
+# resurrection au démarrage rejoue une liste de processus périmée.
 - name: Pm2 save configuration for {{ item.name }}
-  become: false
+  become: true
   become_user: "{{ server_user_name }}"
   changed_when: true
   ansible.builtin.command: pm2 save

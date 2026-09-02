@@ -237,8 +237,8 @@ a thought for anything that handles user data.
 Adding a unit is two lines in `alerting_watched_units`. The name must carry its systemd
 suffix — `nginx.service`, not `nginx` — or the drop-in lands in a directory systemd does not
 read and the unit counts twice during the sweep; a check in the role refuses such a list and
-names the offending entries. The page on `monitor.<fullname>` also publishes the state of
-these units next to its URL probes.
+names the offending entries. The status page also publishes the state of these units next to
+its URL probes — from the machine only, see "Reading the status page" below.
 
 **Nothing in this chain is allowed to wait forever.** `sentry-cli` has no timeout option of
 its own, so every call is wrapped in `timeout -k 5 30`, and both units carry a
@@ -350,8 +350,24 @@ systemctl list-timers alert-systemd-sweep.timer   # when the sweep last ran and 
 systemctl start alert-systemd-sweep.service       # run it now
 journalctl -u alert-systemd-sweep.service         # what it found, and whether it could report
 systemctl list-units --failed                     # the same question, without Sentry
-curl -s https://monitor.<fullname> | jq .units    # unit states on the status page
 alert_systemd_failure.sh --self-test              # send one event and check it leaves
+```
+
+#### Reading the status page
+
+The status page is **not published**. It listens on the loopback address only, and the
+`monitor.<fullname>` vhost proxies nothing: it answers `404` on every path except the ACME
+challenge — served on both ports, which is what keeps renewal working — and port 80 otherwise
+redirects to https as every other vhost does. It used
+to serve the machine's internal state to anyone who asked (YWH-PGM10356-254), and each
+anonymous request also triggered eight HTTP probes, four of them outbound. The hostname is
+kept because the deployment pipeline uses it as an SSH target.
+
+Read it from the machine, over SSH, on the port set by `monitor.port` in the inventory —
+8887 today. `jq` is not installed on the servers:
+
+```bash
+ssh <host> 'curl -s http://127.0.0.1:8887' | python3 -m json.tool
 ```
 
 #### Limits you need to know about
@@ -370,7 +386,9 @@ its own timeout fires — the alerting unit lands in `failed`, and the *next* sw
 sweep at the default cap can take five minutes before failing.
 But a sweep whose timer has been disabled reports nothing at all and says nothing about it;
 the only remaining witness is then the status page, which is why the sweep units are in the
-watched list.
+watched list. That witness now costs an SSH session — it is no longer a URL you can open
+from a phone during an incident. It is the price of not publishing the machine's internal
+state to anyone who asks.
 
 **There is no heartbeat.** Between two deployments nothing exercises the DSN as long as no
 unit fails, so a key revoked on the Sentry side goes unnoticed until the next incident — and

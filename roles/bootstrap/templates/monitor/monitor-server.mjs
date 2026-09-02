@@ -136,7 +136,21 @@ async function fetchURLStatus(url) {
   }
 }
 
-const port = 8887
+// Port et interface viennent de l'unité systemd, qui les tient de l'inventaire.
+// Le port était écrit en dur ici alors que l'unité posait déjà `Environment=
+// PORT` : changer `monitor.port` dans l'inventaire ne changeait rien, en
+// silence. L'interface est la boucle locale par défaut — cette page décrit
+// l'intérieur de la machine et n'a aucun lecteur distant légitime.
+const port = Number(process.env.PORT)
+const host = process.env.HOST || "127.0.0.1"
+if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+  // Écouter sur un port éphémère rendrait le service « actif » pour systemd et
+  // injoignable pour nginx : une panne que la page de supervision, elle-même
+  // muette, ne pourrait pas signaler. La borne basse compte autant que le
+  // typage : `Number("")` et `Number(" ")` valent 0, que `listen` traduit
+  // justement par « choisis un port au hasard ».
+  throw new Error(`Invalid PORT for the monitoring server: ${process.env.PORT}`)
+}
 createServer(async (req, res) => {
   // Le corps entier est protégé : le gestionnaire est `async`, donc toute
   // exception non rattrapée devient une promesse rejetée, et sous Node >= 15 une
@@ -159,7 +173,7 @@ createServer(async (req, res) => {
     res.write(JSON.stringify({ error: "status unavailable" }))
   }
   res.end()
-}).listen(port)
+}).listen(port, host)
 
 async function collectStatus() {
   const result = {

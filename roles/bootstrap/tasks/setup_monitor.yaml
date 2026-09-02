@@ -19,22 +19,31 @@
     owner: "{{ server_user_name }}"
     group: "{{ server_user_group }}"
     mode: "0755"
+# 0640 : ce fichier porte l'inventaire des applications et la liste des unités
+# surveillées. Il n'a qu'un lecteur, le service, et aucune raison d'être lisible
+# par tout compte local de la machine.
 - name: Copy monitoring server config file
   ansible.builtin.template:
     src: templates/monitor/monitor-config.json.j2
     dest: "{{ monitor_folder }}/{{ monitor_config_filename }}"
     owner: "{{ server_user_name }}"
     group: "{{ server_user_group }}"
-    mode: "0755"
+    mode: "0640"
 - name: Setup monitor service
   ansible.builtin.template:
     src: templates/monitor.service.j2
     dest: /etc/systemd/system/{{ monitor_service }}.service
     mode: "0644"
   notify: Reload systemd
+# `daemon_reload` porté par la tâche elle-même : le `notify: Reload systemd`
+# ci-dessus est différé jusqu'au prochain vidage de file, donc APRÈS ce
+# redémarrage. Sans lui, le tour qui modifie l'unité la redémarre sur la
+# définition encore en cache — une ligne `Environment=` ajoutée ici resterait
+# sans effet jusqu'au déploiement suivant, en silence.
 - name: Restart {{ monitor_service }}
   changed_when: false
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ monitor_service }}"
     state: restarted
     enabled: true
+    daemon_reload: true

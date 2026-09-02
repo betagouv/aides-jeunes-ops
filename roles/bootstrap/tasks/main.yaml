@@ -61,12 +61,35 @@
   ansible.builtin.include_tasks: nginx_application_default_site.yaml
   with_items: "{{ applications }}"
   when: not(item.default_site is not defined or item.default_site is false)
+# La page de supervision n'est plus publiée : le vhost reste déclaré, mais ne
+# proxifie plus rien. Elle décrit l'intérieur de la machine — noms d'unités,
+# ports d'écoute locaux, existence de la préproduction — et chaque requête
+# anonyme déclenchait huit sondes HTTP, dont quatre sortantes vers la production
+# et la préproduction. Le service lui-même n'écoute plus que sur la boucle
+# locale, où il se consulte par SSH ; fermer le vhost sans fermer l'écoute
+# n'aurait fait que déplacer la fuite du nom vers le port.
+#
+# Le bloc `server` est conservé plutôt que supprimé, pour garder la réponse du
+# nom déterministe : sans lui, ce nom retomberait sur le vhost que l'ordre de
+# chargement désigne. Le nom, lui, doit survivre dans tous les cas — la CI
+# applicative s'en sert comme cible SSH.
 - name: Setup monitoring site
   ansible.builtin.include_tasks: nginx_site.yaml
   vars:
     service_domain: monitor.{{ fullname }}
     upstream_name: monitor
     https: true
+    expose_upstream: false
+# La file des handlers est vidée ici, et pas à la fin de la pièce : entre ce
+# point et sa fin s'exécutent deux `npm ci` et deux constructions Vite. L'échec
+# de l'une d'elles avorte le jeu avant `nginx -t && reload`, et laisse la
+# machine dans l'état le plus trompeur qui soit pour un correctif de sécurité —
+# le fichier sur disque dit `404`, nginx sert encore la configuration fuyante
+# qu'il a en mémoire, et quiconque relit le fichier conclut que c'est corrigé.
+# Vider ici est sans effet de bord : les configurations d'amont et le site par
+# défaut sont déjà écrits, et `nginx -t` garde le rechargement.
+- name: Apply the closed monitoring vhost before the application builds
+  ansible.builtin.meta: flush_handlers
 - name: Provision tasks
   ansible.builtin.include_tasks: nginx_application_sites.yaml
   with_items: "{{ applications }}"
