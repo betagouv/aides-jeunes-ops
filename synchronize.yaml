@@ -20,6 +20,11 @@
       ansible.builtin.pip:
         name: ansible
         virtualenv: /opt/venv
+    - name: Force git HTTP transport to HTTP/1.1
+      community.general.git_config:
+        name: http.version
+        scope: system
+        value: HTTP/1.1
     - name: Clone application repository
       ansible.builtin.git:
         repo: "{{ ops.repository }}"

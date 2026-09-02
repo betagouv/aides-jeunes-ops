@@ -1,0 +1,7 @@
+---
+# Forcer HTTP/1.1 rétablit le transport.
+- name: Force git HTTP transport to HTTP/1.1
+  community.general.git_config:
+    name: http.version
+    scope: system
+    value: HTTP/1.1

@@ -3,6 +3,14 @@
 - name: Initialize server
   ansible.builtin.include_tasks: initialize_server.yaml
 
+## Setup git
+- name: Configure git HTTP transport
+  ansible.builtin.include_tasks:
+    file: configure_git.yaml
+    apply:
+      tags: always
+  tags: always
+
 ## Setup nginx
 - name: Install and configure nginx
   ansible.builtin.include_tasks: install_nginx.yaml
