@@ -30,34 +30,32 @@
         - NODE_ENV: production
         - MONGODB_URL: mongodb://127.0.0.1/db_{{ item.name }}
         - MES_AIDES_ROOT_URL: http{{ 's' if item.https }}://{{ item.domain }}
-# `startOrRestart`, et non `startOrReload` : le rechargement roulant démarre le
-# nouveau worker pendant que l'ancien écoute encore. En mode cluster, c'est le
-# primaire pm2 qui détient la socket, indexée par `adresse:port` — un worker qui
-# demande une adresse différente de celle déjà détenue provoque un `bind()`
-# neuf, donc EADDRINUSE.
+# Le rechargement roulant ne coûte aucune coupure tant que l'ADRESSE d'écoute ne
+# change pas — mesuré : 0 réponse non-200 sur 234 sondes. C'est le cas de tous
+# les déploiements ordinaires, qui ne changent que le code.
 #
-# Ce que devient cette collision dépend de `min_uptime` (1 s par défaut) : un
-# démarrage plus long qu'une seconde remet le compteur à zéro et pm2 converge ;
-# plus court, les échecs s'accumulent jusqu'à `max_restarts` et les quatre
-# workers finissent `errored`, plus rien n'écoute. L'application démarre en
-# 1,2 s mesuré : le rechargement roulant est un pile ou face, et le côté pile
-# est « site mort, déploiement vert ».
+# Il ne sait en revanche pas changer d'adresse : le nouveau worker démarre
+# pendant que l'ancien écoute encore, et en mode cluster c'est le primaire pm2
+# qui détient la socket, indexée par `adresse:port`. En demander une autre
+# provoque un `bind()` neuf, donc EADDRINUSE. L'issue dépend alors de
+# `min_uptime` (1 s) — un démarrage plus long remet le compteur à zéro et pm2
+# converge, plus court les échecs s'accumulent jusqu'à `max_restarts` et les
+# workers finissent `errored`. L'application démarre en 1,2 s : 0,2 s de marge.
 #
-# Le prix est une coupure égale au temps de démarrage de l'application — 1,5 s
-# mesuré sur un banc, davantage sur la machine chargée — à CHAQUE déploiement,
-# là où le rechargement roulant n'en coûtait aucune en régime permanent
-# (mesuré : 0 réponse non-200 sur 234 sondes). C'est un coût accepté, pas un
-# coût qu'on payait déjà : c'est le prix du changement d'adresse, que le
-# rechargement roulant ne sait pas faire.
+# Ce risque est borné à ce cas, et il n'est plus silencieux : l'attente
+# ci-dessous fait ROUGIR le déploiement quand plus rien n'écoute, là où `pm2`
+# rend 0. Si vous changez délibérément `HOST` ou `node_server_port`, passez ce
+# déploiement-là en `startOrRestart`, ou faites un `pm2 delete` avant — c'est
+# ainsi qu'a été faite la bascule vers la boucle locale.
 - name: Pm2 restart {{ item.name }}
   become: true
   become_user: "{{ server_user_name }}"
   changed_when: true
-  ansible.builtin.command: pm2 startOrRestart {{ application_folder }}/pm2_config.yaml --update-env
+  ansible.builtin.command: pm2 startOrReload {{ application_folder }}/pm2_config.yaml --update-env
 # `pm2` rend 0 même quand tous les workers ont fini `errored` : sans cette
 # attente, un démarrage qui échoue laisse le site en 502 et le déploiement au
-# vert. Le redémarrage tuant les anciens workers d'abord, l'échec n'est plus
-# partiel — il est total. C'est la contrepartie à payer pour `startOrRestart`.
+# vert. C'est cette garde, et non le mode de redémarrage, qui empêche la panne
+# d'être silencieuse.
 #
 # Le délai n'est pas de la prudence, c'est ce qui rend la garde utile. Sondée
 # immédiatement, elle ne voit que le cas « le worker n'écoute jamais » : en mode
