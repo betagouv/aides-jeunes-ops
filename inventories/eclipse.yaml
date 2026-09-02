@@ -18,7 +18,7 @@ virtualmachines:
         port: 8887
       applications:
         - name: aides_jeunes
-          repository: https://github.com/betagouv/aides-jeunes.git
+          repository: git@github.com:betagouv/aides-jeunes.git
           branch: main
           default_site: true
           https: true
@@ -31,7 +31,7 @@ virtualmachines:
             simulations: ""
             followups: ""
         - name: aides_jeunes_preprod
-          repository: https://github.com/betagouv/aides-jeunes.git
+          repository: git@github.com:betagouv/aides-jeunes.git
           branch: dev
           https: true
           domain: preprod.mes-aides.incubateur.net
@@ -40,7 +40,7 @@ virtualmachines:
           openfisca_server_port: 2002
           openfisca_worker_number: 2
       ops:
-        repository: https://github.com/betagouv/aides-jeunes-ops.git
+        repository: git@github.com:betagouv/aides-jeunes-ops.git
         branch: dev
         update_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILf+3BWu3FJDmuouJK1SuAaQrPLmJrBR1xMf5fGCJtGz eclipse@eclipse
       ignored_ssl_domains:
