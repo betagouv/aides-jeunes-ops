@@ -1,0 +1,249 @@
+---
+- name: Set alerting variables
+  ansible.builtin.set_fact:
+    alerting_directory: /etc/aides-jeunes
+    alerting_env_file: /etc/aides-jeunes/alerting.env
+    alerting_script_path: /usr/local/sbin/alert_systemd_failure.sh
+    alerting_dsn_sync_script_path: /usr/local/sbin/sync_alerting_dsn.sh
+    # La CLÉ du DSN d'alerte est déjà sur la machine, dans le .env de
+    # l'application par défaut : c'est celle qu'utilisent les tâches cron. On la
+    # reprend là plutôt que d'en introduire une seconde à gérer et à faire
+    # tourner. La destination, elle, vient de l'inventaire — voir
+    # `alerting_dsn_destination` dans defaults/main.yaml.
+    alerting_dsn_applications: >-
+      {{ applications | selectattr('default_site', 'defined')
+         | selectattr('default_site') | map(attribute='name') | list }}
+# Chaîne vide plutôt que `| first` sur une séquence potentiellement vide, qui
+# rendrait « No first item, sequence was empty » à mi-parcours du bootstrap sans
+# dire de quoi il s'agit.
+- name: Set the alerting DSN source
+  ansible.builtin.set_fact:
+    alerting_dsn_source: >-
+      {{ ('/home/' ~ server_user_name ~ '/' ~ alerting_dsn_applications[0] ~ '/repository/.env')
+         if (alerting_dsn_applications | length == 1) else '' }}
+# Les contrôles de ce fichier sont des `assert` ignorés, et non des `debug` :
+# une chaîne d'alerte morte ne doit pas interrompre le déploiement de
+# l'application — le mécanisme censé signaler les pannes en deviendrait une —
+# mais un message noyé dans des centaines de lignes vertes n'est pas un signal.
+# Ignorés, ils sortent en rouge et font apparaître `ignored=` au récapitulatif.
+- name: Check that exactly one default application is declared
+  ansible.builtin.assert:
+    that: alerting_dsn_applications | length == 1
+    fail_msg: >-
+      L'inventaire déclare {{ alerting_dsn_applications | length }} application(s)
+      avec `default_site: true` ; il en faut exactement une pour savoir où lire
+      SENTRY_CRON_DSN. Les unités d'alerte sont installées mais resteront muettes.
+    quiet: true
+  register: alerting_default_application_check
+  ignore_errors: true
+# Le seul geste manuel de ce mécanisme. Il est assumé : lire la destination dans
+# le .env applicatif reviendrait à laisser l'utilisateur de déploiement choisir
+# où partent les journaux d'unités root, et à trancher par comparaison d'URL —
+# ce qui s'est fait contourner trois fois de suite.
+- name: Check that an alerting DSN destination is declared
+  ansible.builtin.assert:
+    that: alerting_dsn_destination | length > 0
+    fail_msg: >-
+      `alerting_dsn_destination` est vide : l'alerte est installée mais inerte.
+      Renseigner « hôte[:port]/projet » dans l'inventaire — la valeur se lit dans
+      SENTRY_CRON_DSN sur le serveur, entre le « @ » et la fin. Ni l'hôte ni le
+      numéro de projet ne sont des secrets, seule la clé en est un et elle reste
+      dans le .env.
+    quiet: true
+  register: alerting_dsn_destination_check
+  ignore_errors: true
+# La destination vient du dépôt, donc une faute de frappe y est une erreur de
+# revue, pas une attaque. Ce contrôle sert à la rendre lisible tout de suite
+# plutôt qu'à travers un échec de sentry-cli trois tâches plus loin.
+- name: Check that the alerting DSN destination is well formed
+  when: alerting_dsn_destination | length > 0
+  ansible.builtin.assert:
+    that:
+      - alerting_dsn_destination is match('^[A-Za-z0-9._~-]+(:[0-9]+)?/[A-Za-z0-9]+$')
+      - alerting_dsn_scheme in ['http', 'https']
+    fail_msg: >-
+      `alerting_dsn_destination` doit s'écrire « hôte[:port]/projet »
+      (exemple : o4507.ingest.de.sentry.io/4507123), sans schéma ni clé, et
+      `alerting_dsn_scheme` vaut http ou https. Reçu :
+      {{ alerting_dsn_scheme }}://{{ alerting_dsn_destination }}
+    quiet: true
+  register: alerting_dsn_destination_format_check
+  ignore_errors: true
+- name: Check that the sweep event cap is a sane integer
+  ansible.builtin.assert:
+    that:
+      - alerting_sweep_max_events is integer
+      - alerting_sweep_max_events | int >= 1
+      - alerting_sweep_max_events | int <= 500
+    fail_msg: >-
+      `alerting_sweep_max_events` doit être un entier entre 1 et 500. Reçu :
+      {{ alerting_sweep_max_events }}. Hors de ces bornes, le délai de garde
+      calculé du balayage devient nul ou négatif, que systemd lit « infinity ».
+    quiet: true
+  register: alerting_sweep_cap_check
+  ignore_errors: true
+# Sans suffixe systemd, le greffon atterrit dans un répertoire que systemd ne lit
+# pas — /etc/systemd/system/nginx.d au lieu de nginx.service.d — et la même unité
+# compte pour deux au balayage, sous deux empreintes différentes. La promesse
+# « ajouter une unité = deux lignes » suppose que ce contrôle existe.
+- name: Check that every watched unit name carries its systemd suffix
+  ansible.builtin.assert:
+    that: >-
+      alerting_watched_units | rejectattr('name', 'search',
+        '\.(service|timer|socket|mount|path|target|slice|scope|swap|automount|device)$')
+      | list | length == 0
+    fail_msg: >-
+      Ces unités de `alerting_watched_units` n'ont pas de suffixe systemd :
+      {{ alerting_watched_units | rejectattr('name', 'search',
+         '\.(service|timer|socket|mount|path|target|slice|scope|swap|automount|device)$')
+         | map(attribute='name') | join(', ') }}.
+      Leur greffon OnFailure= ne sera pas lu par systemd.
+    quiet: true
+  register: alerting_unit_names_check
+  ignore_errors: true
+- name: Create alerting configuration directory
+  ansible.builtin.file:
+    path: "{{ alerting_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+- name: Set whether the alerting DSN can be composed
+  ansible.builtin.set_fact:
+    alerting_dsn_ready: >-
+      {{ (alerting_dsn_source | length > 0)
+         and (alerting_dsn_destination | length > 0)
+         and (alerting_dsn_destination_format_check.failed | default(true) is false) }}
+- name: Install alerting DSN synchronisation script
+  when: alerting_dsn_ready
+  ansible.builtin.template:
+    src: templates/alerting/sync_alerting_dsn.sh.j2
+    dest: "{{ alerting_dsn_sync_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+# Le .env applicatif n'est pas produit par ce dépôt : il est déposé à la main
+# sur le serveur. Sur une machine neuve il n'existe pas encore.
+# `timeout` en tête de commande : le module `command` n'a pas de délai de garde,
+# et un .env remplacé par un tube nommé bloquerait le déploiement sans fin.
+- name: Compose the alerting DSN from the declared destination and the .env key
+  when: alerting_dsn_ready
+  ansible.builtin.command:
+    cmd: timeout 60 {{ alerting_dsn_sync_script_path }}
+  register: alerting_dsn_sync
+  changed_when: "'DSN mis à jour.' in alerting_dsn_sync.stdout"
+  failed_when: false
+- name: Check that the alerting DSN could be composed
+  when: alerting_dsn_ready
+  ansible.builtin.assert:
+    that: alerting_dsn_sync.rc == 0
+    fail_msg: >-
+      Le DSN d'alerte n'a pas pu être écrit dans {{ alerting_env_file }} :
+      {{ alerting_dsn_sync.stderr | default('') }}
+      Les unités d'alerte échoueront bruyamment tant que ce sera le cas.
+      Corriger la clé SENTRY_CRON_DSN dans {{ alerting_dsn_source }} puis rejouer
+      bootstrap.yaml.
+    quiet: true
+  register: alerting_dsn_sync_check
+  ignore_errors: true
+- name: Install systemd failure alerting script
+  ansible.builtin.template:
+    src: templates/alerting/alert_systemd_failure.sh.j2
+    dest: "{{ alerting_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+  register: alerting_script
+- name: Setup systemd failure alerting service template
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-failure@.service.j2
+    dest: /etc/systemd/system/{{ alerting_failure_service_name }}@.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: alerting_failure_unit
+  notify: Reload systemd
+- name: Setup systemd sweep service
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-sweep.service.j2
+    dest: /etc/systemd/system/{{ alerting_sweep_service_name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: alerting_sweep_unit
+  notify: Reload systemd
+- name: Setup systemd sweep timer
+  ansible.builtin.template:
+    src: templates/alerting/alert-systemd-sweep.timer.j2
+    dest: /etc/systemd/system/{{ alerting_sweep_service_name }}.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+- name: Create drop-in directory for each watched unit
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ watched_unit.name }}.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ alerting_watched_units }}"
+  loop_control:
+    loop_var: watched_unit
+    label: "{{ watched_unit.name }}"
+- name: Wire OnFailure alerting on each watched unit
+  ansible.builtin.template:
+    src: templates/alerting/onfailure.conf.j2
+    dest: /etc/systemd/system/{{ watched_unit.name }}.d/50-onfailure.conf
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ alerting_watched_units }}"
+  loop_control:
+    loop_var: watched_unit
+    label: "{{ watched_unit.name }}"
+  notify: Reload systemd
+# Le gestionnaire de rechargement est différé jusqu'au prochain point de
+# synchronisation : sans ce drapeau, systemd démarrerait le timer sur une
+# définition d'unité qu'il ne connaît pas encore.
+- name: Reload systemd before enabling the sweep timer
+  ansible.builtin.meta: flush_handlers
+- name: Enable and start the systemd sweep timer
+  ansible.builtin.systemd:
+    name: "{{ alerting_sweep_service_name }}.timer"
+    enabled: true
+    state: started
+# Une chaîne d'alerte qui s'installe « tout vert » sur une machine où rien ne
+# partira jamais reproduit exactement le silence qu'elle est censée casser. Le
+# seul contrôle qui vaille est d'émettre réellement un événement et de regarder
+# s'il part.
+# Il ne tourne pas à chaque déploiement — un événement Sentry par déploiement
+# rouvrirait un ticket à chaque fois — mais dès que quelque chose a bougé, ou
+# quand le fichier d'environnement manque, c'est-à-dire dans tous les cas où la
+# chaîne peut être cassée sans qu'on le sache.
+- name: Check whether the alerting environment file is in place
+  ansible.builtin.stat:
+    path: "{{ alerting_env_file }}"
+  register: alerting_env_file_stat
+- name: Verify that an alert can actually reach Sentry
+  when: >-
+    not alerting_env_file_stat.stat.exists
+    or (alerting_dsn_sync is defined and alerting_dsn_sync is changed)
+    or alerting_script is changed
+    or alerting_failure_unit is changed
+    or alerting_sweep_unit is changed
+  ansible.builtin.command:
+    cmd: timeout 60 {{ alerting_script_path }} --self-test
+  register: alerting_self_test
+  changed_when: false
+  failed_when: false
+- name: Check that the alerting chain reaches Sentry
+  ansible.builtin.assert:
+    that: alerting_self_test.rc | default(0) == 0
+    fail_msg: >-
+      L'auto-contrôle a échoué : aucun événement n'a pu être émis vers Sentry.
+      {{ alerting_self_test.stderr | default('') }}
+      Les unités systemd en échec ne seront signalées à personne tant que ce sera le cas.
+    quiet: true
+  register: alerting_self_test_check
+  ignore_errors: true

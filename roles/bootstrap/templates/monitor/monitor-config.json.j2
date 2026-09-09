@@ -1,1 +1,4 @@
-{ "applications": {{ applications|to_json(indent=4, sort_keys=True) }} }
+{
+  "applications": {{ applications | to_json(indent=4, sort_keys=True) }},
+  "units": {{ alerting_watched_units | to_json(indent=4, sort_keys=True) }}
+}

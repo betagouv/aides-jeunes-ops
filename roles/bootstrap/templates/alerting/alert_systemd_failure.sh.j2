@@ -1,0 +1,270 @@
+#!/bin/bash
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/alerting/alert_systemd_failure.sh.j2
+
+# Pousse un événement Sentry pour chaque unité systemd en défaut.
+#
+#   alert_systemd_failure.sh <unité>     une unité nommée, appelé par `OnFailure=`
+#   alert_systemd_failure.sh --sweep     balayage de l'état du système, quotidien
+#   alert_systemd_failure.sh --self-test émet un événement de contrôle et sort
+#
+# Les deux premiers modes existent parce qu'ils n'attrapent pas la même chose.
+# `OnFailure=` réagit à une *transition* : il alerte à la seconde où l'unité
+# tombe, et seulement à ce moment-là. Le balayage lit un *état* : il retrouve
+# une unité tombée avant l'installation du mécanisme, une unité arrêtée qui
+# aurait dû tourner, un timer disparu — et il redit chaque jour ce qui reste
+# cassé. Le service de supervision est resté en échec un an sans que la
+# transition, unique et passée, ne serve à personne.
+#
+# Toute anomalie sort en code non nul : l'unité d'alerte passe elle-même en
+# `failed`, ce que le balayage suivant remonte. Aucun repli silencieux.
+
+set -euo pipefail
+
+env_file="{{ alerting_env_file }}"
+instance="{{ instance_name }}"
+max_events="{{ alerting_sweep_max_events }}"
+# Délai de garde de chaque appel à sentry-cli. Il n'a pas d'option pour cela, et
+# une connexion TCP acceptée mais jamais répondue — pare-feu à états, NAT, ingest
+# saturé — le laisse attendre indéfiniment. Sans ce garde-fou, le balayage reste
+# « activating » pour toujours, le déclenchement quotidien suivant est fusionné
+# dans le job en cours, et l'alerte s'arrête définitivement.
+sentry_timeout_seconds=30
+# Listes plates, séparées par des espaces : un nom d'unité systemd ne contient
+# jamais d'espace. Un tableau bash obligerait à écrire son cardinal, dont la
+# syntaxe accole une accolade et un dièse que Jinja lit comme une ouverture de
+# commentaire — le gabarit ne se rendrait alors plus du tout.
+watched_units="{{ alerting_watched_units | map(attribute='name') | join(' ') }}"
+# Unités dont on attend qu'elles tournent. Un service déclenché par un timer n'y
+# figure pas : son état normal est « inactive ».
+watched_active="{{ alerting_watched_units | selectattr('expect_active') | map(attribute='name') | join(' ') }}"
+
+# État du balayage. Volontairement global : `emit` doit pouvoir le faire avancer.
+emitted_units=""
+emitted_count=0
+skipped_count=0
+send_status=0
+
+fail() {
+  printf 'ALERTE SYSTEMD IMPOSSIBLE : %s\n' "$1" >&2
+  exit 1
+}
+
+command -v sentry-cli >/dev/null ||
+  fail "sentry-cli est introuvable, aucun événement ne peut partir"
+
+# Le plafond est comparé par `[ … -ge … ]` à l'intérieur d'un `if` : bash y rend
+# une erreur d'opérande sans que `set -e` n'intervienne, et une valeur non
+# numérique désactiverait donc le plafond en silence.
+case "$max_events" in
+  '' | *[!0-9]*) fail "plafond d'événements invalide ($max_events) : un entier est attendu" ;;
+esac
+if [ "$max_events" -lt 1 ]; then
+  fail "plafond d'événements invalide ($max_events) : au moins 1 est requis"
+fi
+
+# Le DSN arrive normalement par `EnvironmentFile=` : systemd analyse le fichier
+# lui-même, sans interpréteur de commandes. Pour une exécution à la main, on le
+# relit ici — par extraction, JAMAIS par `source`. Le fichier dérive du .env
+# applicatif, que possède l'utilisateur de déploiement : le sourcer rendrait à
+# ce dernier l'exécution de code en root que l'extraction lui refuse côté
+# synchronisation.
+if [ -z "${SENTRY_DSN:-}" ]; then
+  # `-f` et pas seulement `-r` : un tube nommé déposé à cet emplacement est
+  # lisible et bloquerait la lecture indéfiniment, en root.
+  if [ ! -f "$env_file" ] || [ ! -r "$env_file" ]; then
+    fail "$env_file est absent, illisible ou n'est pas un fichier ordinaire — rejouer bootstrap.yaml"
+  fi
+  # `tail` et non `head` : avec `pipefail`, un `head` qui ferme le tube tue `sed`
+  # par SIGPIPE et le script sortirait en 141 sans un mot.
+  SENTRY_DSN="$(sed -n 's/^SENTRY_DSN=//p' "$env_file" | tail -n 1)"
+fi
+if [ -z "$SENTRY_DSN" ]; then
+  fail "SENTRY_DSN est absent de $env_file"
+fi
+
+hostname_fqdn="$(uname -n)"
+
+unit_property() {
+  systemctl show "$1" --property="$2" --value
+}
+
+# Appartenance testée sans jamais interpréter le nom d'unité :
+#  - pas de motif `case`, un contre-oblique d'échappée systemd
+#    (« var-lib\x2ddocker.mount ») y ferait rater la reconnaissance ;
+#  - pas de boucle `for item in $2` non plus, qui soumettrait chaque élément à
+#    l'expansion de chemin — « a*b.service » reconnaîtrait « aXb.service » si un
+#    fichier de ce nom existait dans le répertoire courant.
+# Dans les deux cas la conséquence est la même : journal non joint et double
+# émission pour une même unité.
+# Ici seule l'étoile de tête est un motif ; la partie entre guillemets est
+# comparée littéralement.
+in_list() {
+  local needle="$1"
+  local haystack=" $2 "
+  [ "${haystack#*" $needle "}" != "$haystack" ]
+}
+
+# Un événement par unité, empreinte stable : Sentry regroupe toutes les alertes
+# d'une même unité dans un seul ticket, qu'on résout quand la panne est traitée.
+# Le détail volatil (journal, code de sortie) part en pièces jointes et non dans
+# le message, sans quoi chaque exécution ouvrirait un ticket de plus.
+send_event() {
+  local unit="$1"
+  local summary="$2"
+  local journal=""
+  local status
+  local journal_args=()
+
+  # MINIMISATION : le journal ne suit que pour les unités déclarées dans
+  # `alerting_watched_units`. Le balayage remonte aussi les unités que personne
+  # n'a listées — les services applicatifs et openfisca en font partie, et leur
+  # journal peut porter des données personnelles ou financières. Pour celles-là
+  # on signale l'échec, sans en exporter le contenu vers Sentry.
+  if in_list "$unit" "$watched_units"; then
+    journal="$(mktemp)"
+    # Le journal de l'unité porte la cause réelle : la ligne de mongodump qui a
+    # échoué, la trace du crash au démarrage. Sans elle, l'alerte oblige à se
+    # connecter à la machine pour apprendre quoi que ce soit.
+    if ! journalctl --unit "$unit" --lines=50 --no-pager --output=short-iso >"$journal" 2>&1; then
+      printf 'journalctl a échoué pour %s, journal indisponible\n' "$unit" >>"$journal"
+    fi
+    journal_args=(--logfile "$journal")
+  else
+    journal_args=(--extra "journal:non joint, unité hors de alerting_watched_units")
+  fi
+
+  # --no-environ : sans ce drapeau, sentry-cli joint l'environnement du
+  # processus à l'événement. Ce script tourne en root et porte un DSN.
+  status=0
+  SENTRY_DSN="$SENTRY_DSN" timeout -k 5 "$sentry_timeout_seconds" sentry-cli send-event \
+    --no-environ \
+    --level error \
+    --message "$summary" \
+    --fingerprint "systemd-unit-failure" \
+    --fingerprint "$unit" \
+    --tag "unit:$unit" \
+    --tag "instance:$instance" \
+    --tag "host:$hostname_fqdn" \
+    --extra "load_state:$(unit_property "$unit" LoadState)" \
+    --extra "active_state:$(unit_property "$unit" ActiveState)" \
+    --extra "sub_state:$(unit_property "$unit" SubState)" \
+    --extra "result:$(unit_property "$unit" Result)" \
+    --extra "exec_main_status:$(unit_property "$unit" ExecMainStatus)" \
+    "${journal_args[@]}" || status=$?
+
+  if [ -n "$journal" ]; then
+    rm -f "$journal"
+  fi
+
+  if [ "$status" -ne 0 ]; then
+    printf 'sentry-cli a échoué (code %s) pour %s\n' "$status" "$unit" >&2
+    return "$status"
+  fi
+  printf 'Événement Sentry émis pour %s : %s\n' "$unit" "$summary"
+}
+
+# Déduplication et plafond, en un seul endroit. Une unité peut être vue deux
+# fois — déclarée *et* présente dans `systemctl --failed` — et ne doit pas
+# ouvrir deux fois le même ticket ni consommer deux fois le budget.
+emit() {
+  local unit="$1"
+  local summary="$2"
+
+  if in_list "$unit" "$emitted_units"; then
+    return 0
+  fi
+  if [ "$emitted_count" -ge "$max_events" ]; then
+    skipped_count=$((skipped_count + 1))
+    return 0
+  fi
+  emitted_units="$emitted_units $unit"
+  emitted_count=$((emitted_count + 1))
+  send_event "$unit" "$summary" || send_status=1
+}
+
+sweep() {
+  local unit
+  local state
+  local failed_units
+
+  # LES UNITÉS DÉCLARÉES D'ABORD. `systemctl` rend sa liste par ordre
+  # alphabétique : une salve d'unités « alert-systemd-failure@… » ou de services
+  # de test trie en tête et mangerait tout le plafond avant qu'on arrive à
+  # nginx. Ce qu'on a explicitement demandé à surveiller passe donc en premier,
+  # quoi qu'il arrive par ailleurs.
+  # Ce passage attrape aussi le mode de panne muet : une unité arrêtée, jamais
+  # démarrée, ou dont le fichier a disparu n'est pas « en échec », elle est
+  # simplement absente — aucune requête globale ne peut la deviner.
+  if [ -n "$watched_units" ]; then
+    # shellcheck disable=SC2086 # découpage voulu : un nom d'unité n'a pas d'espace
+    for unit in $watched_units; do
+      state="$(unit_property "$unit" ActiveState)"
+      if [ "$state" = "failed" ]; then
+        emit "$unit" "systemd : unité en échec — $unit"
+      elif in_list "$unit" "$watched_active" && [ "$state" != "active" ]; then
+        emit "$unit" "systemd : unité attendue active, état « $state » — $unit"
+      fi
+    done
+  fi
+
+  # Puis tout le reste de ce qui est en échec, y compris ce que personne n'a
+  # pensé à lister : les services openfisca, dont le nom dépend de l'inventaire,
+  # et tout ce qui sera ajouté à la machine plus tard.
+  # `--plain` retire la puce que systemd place devant une unité en échec, sans
+  # quoi le nom lu serait « ● ».
+  failed_units="$(systemctl list-units --state=failed --all --no-legend --plain)" ||
+    fail "systemctl list-units a échoué, impossible de connaître l'état du système"
+
+  while read -r unit _; do
+    [ -n "$unit" ] || continue
+    emit "$unit" "systemd : unité en échec — $unit"
+  done <<<"$failed_units"
+
+  if [ "$skipped_count" -gt 0 ]; then
+    printf 'Plafond de %s événements atteint : %s unité(s) en défaut non remontée(s) individuellement.\n' \
+      "$max_events" "$skipped_count" >&2
+  fi
+
+  if [ "$emitted_count" -eq 0 ]; then
+    printf 'Balayage systemd : aucune unité en défaut.\n'
+  fi
+
+  # Le balayage ne rend un code non nul que si *l'émission* a échoué. Signaler
+  # une panne n'est pas en être une : sortir en erreur ici mettrait le balayage
+  # en échec et le ferait s'alerter lui-même en boucle.
+  return "$send_status"
+}
+
+# Prouve que la chaîne entière fonctionne : DSN lisible, sentry-cli présent,
+# Sentry joignable. Sans ce contrôle, le mécanisme s'installe « tout vert » sur
+# une machine où aucune alerte ne partira jamais — soit exactement le silence
+# qu'il est censé casser.
+self_test() {
+  SENTRY_DSN="$SENTRY_DSN" timeout -k 5 "$sentry_timeout_seconds" sentry-cli send-event \
+    --no-environ \
+    --level info \
+    --message "systemd : chaîne d'alerte installée et joignable — $hostname_fqdn" \
+    --fingerprint "systemd-alerting-self-test" \
+    --tag "instance:$instance" \
+    --tag "host:$hostname_fqdn"
+  printf 'Auto-contrôle : un événement Sentry est effectivement parti.\n'
+}
+
+case "${1:-}" in
+  --sweep)
+    sweep
+    ;;
+  --self-test)
+    self_test
+    ;;
+  "")
+    fail "aucun argument : attendu une unité systemd, --sweep ou --self-test"
+    ;;
+  -*)
+    fail "option inconnue « $1 » : attendu une unité systemd, --sweep ou --self-test"
+    ;;
+  *)
+    send_event "$1" "systemd : unité en échec — $1"
+    ;;
+esac

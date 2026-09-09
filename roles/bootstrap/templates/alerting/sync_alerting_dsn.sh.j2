@@ -1,0 +1,134 @@
+#!/bin/bash
+# MANAGED BY MES AIDES OPS
+# Modifications should be made in templates/alerting/sync_alerting_dsn.sh.j2
+
+# Compose le DSN d'alerte et l'écrit dans un fichier d'environnement fermé
+# (0600 root:root), d'où les unités d'alerte le liront.
+#
+# LE POINT IMPORTANT DE CE SCRIPT : la destination — schéma, hôte, port, projet —
+# vient du DÉPÔT (`alerting_dsn_destination`, relu en revue de code). Du .env
+# applicatif, on ne prend QUE la clé publique, et on vérifie qu'elle est faite
+# uniquement de lettres et de chiffres.
+#
+# Ce découpage est structurel, pas défensif. Le .env appartient à l'utilisateur
+# de déploiement : tout ce qu'il contient est hostile par hypothèse. Tant qu'on
+# lisait la destination dedans, il fallait décider par comparaison de texte si
+# une URL fournie par un tiers pointait au bon endroit — et une comparaison
+# d'URL en shell se fait contourner : d'abord aucun ancrage, puis l'hôte sans le
+# chemin, puis un glob qui traverse la barre oblique. Ici il n'y a plus rien à
+# comparer. Une clé restreinte à [A-Za-z0-9] ne peut contenir ni « @ », ni « / »,
+# ni « : » : elle ne peut donc pas ajouter d'autorité ni de chemin, quoi qu'on
+# écrive dans le .env.
+#
+# Ce qui reste au propriétaire du .env : mettre une mauvaise clé, donc CASSER
+# l'alerte. Il ne peut plus la DÉTOURNER. C'est une réduction de la panne à
+# quelque chose de bruyant, que l'auto-contrôle et le balayage quotidien voient.
+#
+# La clé ne transite par aucune variable ansible et n'est jamais affichée.
+
+set -euo pipefail
+umask 0077
+
+source_env="{{ alerting_dsn_source }}"
+target_env="{{ alerting_env_file }}"
+scheme="{{ alerting_dsn_scheme }}"
+destination="{{ alerting_dsn_destination }}"
+
+fail() {
+  printf 'SYNCHRONISATION DU DSN SENTRY IMPOSSIBLE : %s\n' "$1" >&2
+  exit 1
+}
+
+# `-f` et pas seulement `-r` : un tube nommé déposé à cet emplacement par le
+# propriétaire du .env est lisible, et bloquerait cette tâche root indéfiniment.
+if [ ! -f "$source_env" ] || [ ! -r "$source_env" ]; then
+  fail "$source_env est absent, illisible, ou n'est pas un fichier ordinaire"
+fi
+
+# `sed` plutôt que `source` : le .env appartient à l'utilisateur de déploiement
+# et ce script tourne en root. Le sourcer donnerait une exécution de code en
+# root à quiconque peut écrire ce fichier, et importerait au passage tous les
+# autres secrets applicatifs dans l'environnement du processus.
+# La dernière affectation gagne, comme le ferait un interpréteur de .env.
+raw="$(
+  sed -n \
+    -e 's/^[[:space:]]*//' \
+    -e 's/^export[[:space:]]\{1,\}//' \
+    -e 's/^SENTRY_CRON_DSN[[:space:]]*=[[:space:]]*//p' \
+    "$source_env" | tail -n 1
+)"
+
+trim() {
+  printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# ORDRE IMPORTANT : les espaces de fin d'abord, les guillemets ensuite, puis de
+# nouveau les espaces qui étaient à l'intérieur des guillemets. Retirer les
+# guillemets en premier laisse le guillemet fermant collé à la valeur dès que la
+# ligne du .env se termine par une espace — invisible à la lecture.
+raw="$(trim "$raw")"
+case "$raw" in
+  \"*\")
+    raw="${raw%\"}"
+    raw="${raw#\"}"
+    ;;
+  \'*\')
+    raw="${raw%\'}"
+    raw="${raw#\'}"
+    ;;
+esac
+raw="$(trim "$raw")"
+
+if [ -z "$raw" ]; then
+  fail "SENTRY_CRON_DSN est absent ou vide dans $source_env"
+fi
+
+# Extraction de la seule clé publique. `%%@*` prend ce qui précède la PREMIÈRE
+# arobase : sur un DSN bien formé c'est la clé, et sur n'importe quoi d'autre le
+# résultat contiendra un caractère hors liste blanche et sera refusé juste après.
+# Aucune décision n'est prise à partir de ce qui suit — la destination, elle,
+# vient du dépôt.
+key="${raw#*://}"
+key="${key%%@*}"
+
+# Liste blanche stricte, sur un jeton simple et non sur une URL : c'est tout
+# l'intérêt du découpage. Une clé publique Sentry est alphanumérique.
+case "$key" in
+  "") fail "SENTRY_CRON_DSN de $source_env ne comporte pas de clé publique" ;;
+  *[!A-Za-z0-9]*)
+    fail "la clé publique de SENTRY_CRON_DSN ($source_env) contient un caractère interdit"
+    ;;
+esac
+
+# L'alphabet ne borne pas la taille : une clé démesurée passerait ici et ne se
+# verrait qu'à l'émission, en « http status: 431 » puis, au-delà d'environ
+# 131 ko, en « 203/EXEC — Argument list too long ». Bruyant, mais trois tâches
+# trop loin — le message appartient ici. Une clé publique Sentry fait 32
+# caractères, 128 laisse de la marge à tout format à venir.
+# `wc -c` et non la syntaxe bash du cardinal : celle-ci accole une accolade et un
+# dièse, que Jinja lit comme une ouverture de commentaire — le gabarit ne se
+# rendrait alors plus du tout.
+key_length="$(printf '%s' "$key" | wc -c)"
+if [ "$key_length" -gt 128 ]; then
+  fail "la clé publique de SENTRY_CRON_DSN ($source_env) fait $key_length caractères, 128 au plus"
+fi
+
+# Composition, et non recopie : les trois morceaux sont assemblés ici, deux
+# venant du dépôt et un seul du .env.
+dsn="$scheme://$key@$destination"
+
+candidate="$target_env.candidate"
+printf 'SENTRY_DSN=%s\n' "$dsn" >"$candidate"
+chmod 0600 "$candidate"
+chown root:root "$candidate"
+
+# Écriture uniquement si la valeur a bougé : ansible reste idempotent, et le
+# fichier ne change pas d'horodatage à chaque déploiement.
+if cmp -s "$candidate" "$target_env"; then
+  rm -f "$candidate"
+  printf 'DSN inchangé.\n'
+  exit 0
+fi
+
+mv "$candidate" "$target_env"
+printf 'DSN mis à jour.\n'
