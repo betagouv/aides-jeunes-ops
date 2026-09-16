@@ -5,3 +5,4 @@ production.config.js
 .vagrant
 .venv*
 .idea
+.ansible

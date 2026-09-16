@@ -1,0 +1,40 @@
+[Unit]
+Description=Signale à Sentry l'échec de %i
+Documentation=https://github.com/betagouv/aides-jeunes-ops
+# Pas de `OnFailure=` ici : une alerte qui échoue et qui s'alerte elle-même
+# tourne en rond. Son échec la laisse en `failed`, et c'est le balayage
+# quotidien qui le remonte.
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+# Le DSN entre par systemd, qui analyse ce fichier lui-même : aucune évaluation
+# par un interpréteur de commandes, donc rien à substituer pour qui aurait
+# glissé un `$(…)` dans le .env dont ce fichier dérive.
+# Le préfixe « - » rend le fichier facultatif : absent, c'est le script qui le
+# dit avec un message exploitable, plutôt qu'un « Failed to load environment
+# files » de systemd. L'unité tombe en échec dans les deux cas.
+EnvironmentFile=-{{ alerting_env_file }}
+ExecStart={{ alerting_script_path }} %i
+
+# Sans délai de garde, un `Type=oneshot` hérite de `infinity` : une connexion
+# acceptée mais jamais répondue laisserait une instance figée en root pour chaque
+# unité qui tombe. Un seul événement à émettre ici, d'où une borne courte.
+TimeoutStartSec=120
+
+# Le service ne fait que lire l'état de systemd, le journal, et un fichier
+# d'environnement dans /etc. Il n'écrit nulle part.
+ProtectSystem=strict
+# En particulier : il n'a pas à lire les .env applicatifs, qui appartiennent à
+# l'utilisateur de déploiement. Le DSN lui arrive par {{ alerting_env_file }},
+# recopié par ansible et fermé en 0600 root:root.
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# Pas de section [Install] : ce gabarit n'est instancié que par le `OnFailure=`
+# des unités surveillées.

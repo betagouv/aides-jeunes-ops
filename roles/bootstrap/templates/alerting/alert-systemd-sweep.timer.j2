@@ -1,0 +1,13 @@
+[Unit]
+Description=Déclenche le balayage quotidien des unités systemd de {{ instance_name }}
+
+[Timer]
+OnCalendar={{ alerting_sweep_on_calendar }}
+# Rattrape le balayage manqué si la machine était éteinte à l'heure prévue :
+# une panne survenue pendant l'arrêt est justement celle qu'on veut voir.
+Persistent=true
+AccuracySec=1min
+Unit={{ alerting_sweep_service_name }}.service
+
+[Install]
+WantedBy=timers.target
