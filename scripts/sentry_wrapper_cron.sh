@@ -18,8 +18,6 @@ if [ -z "$SENTRY_CRON_DSN" ]; then
     exit 1
 fi
 
-echo "SENTRY_CRON_DSN is set to: $SENTRY_CRON_DSN"
-
 # The wrapped command is executed and the result status is stored
 COMMAND="$@"
 OUTPUT=$(eval "$COMMAND" 2>&1)
@@ -28,7 +26,9 @@ STATUS=$?
 if [ $STATUS -ne 0 ]; then
     echo "Cron job failed: $COMMAND"
     echo "Error output: $OUTPUT"
-    SENTRY_DSN="$SENTRY_CRON_DSN" sentry-cli send-event -m "Cron job failed: $COMMAND | Error: $OUTPUT"
+    # --no-environ: sentry-cli attaches the process environment to the event by
+    # default, and this script has just sourced an application .env.
+    SENTRY_DSN="$SENTRY_CRON_DSN" sentry-cli send-event --no-environ -m "Cron job failed: $COMMAND | Error: $OUTPUT"
 fi
 
 exit $STATUS
